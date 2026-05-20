@@ -16,4 +16,4 @@ pub mod types;
 mod util;
 
 pub use error::{Error, Result};
-pub use types::{Direction, LorawanVersion, MType};
+pub use types::{Direction, DlSettings, FCtrl, LorawanVersion, MType, Mhdr};
