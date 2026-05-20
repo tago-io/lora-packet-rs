@@ -1,4 +1,4 @@
-//! LoRaWAN 1.0/1.1 packet decoder and encoder.
+//! `LoRaWAN` 1.0/1.1 packet decoder and encoder.
 //!
 //! See the crate `README` for a quickstart.
 
