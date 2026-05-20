@@ -288,6 +288,77 @@ fn payload_crypt(
   out
 }
 
+impl crate::codec::Data {
+  /// Decrypt `FOpts` MAC commands (`LoRaWAN` 1.1 only).
+  ///
+  /// Uses the keystream layout from the official `LoRa` Alliance errata
+  /// "`FCntDwn` Usage in `FOpts` Encryption" (CR v2 r1). When the frame is a
+  /// downlink with `FPort` > 0 the `aFCntDown` flag selects byte 4 = 0x02;
+  /// otherwise it is 0x01.
+  ///
+  /// # Errors
+  /// Currently infallible.
+  pub fn decrypt_fopts(
+    &self,
+    nwk_s_enc_key: &crate::types::NwkSEncKey,
+    f_cnt_msb: u16,
+  ) -> crate::Result<alloc::vec::Vec<u8>> {
+    Ok(fopts_crypt(
+      &self.f_opts,
+      nwk_s_enc_key.as_bytes(),
+      self.direction,
+      self.dev_addr,
+      self.f_port,
+      self.f_cnt_32(f_cnt_msb),
+    ))
+  }
+
+  /// Encrypt `FOpts` MAC commands (`LoRaWAN` 1.1 only).
+  ///
+  /// # Errors
+  /// Currently infallible.
+  pub fn encrypt_fopts(
+    &self,
+    nwk_s_enc_key: &crate::types::NwkSEncKey,
+    f_cnt_msb: u16,
+  ) -> crate::Result<alloc::vec::Vec<u8>> {
+    Ok(fopts_crypt(
+      &self.f_opts,
+      nwk_s_enc_key.as_bytes(),
+      self.direction,
+      self.dev_addr,
+      self.f_port,
+      self.f_cnt_32(f_cnt_msb),
+    ))
+  }
+}
+
+fn fopts_crypt(
+  input: &[u8],
+  key: &[u8; 16],
+  direction: crate::types::Direction,
+  dev_addr: DevAddr,
+  f_port: Option<u8>,
+  f_cnt_32: u32,
+) -> alloc::vec::Vec<u8> {
+  let is_downlink = matches!(direction, crate::types::Direction::Downlink);
+  let dir_byte = u8::from(is_downlink);
+  let a_f_cnt_down = is_downlink && f_port.is_some_and(|p| p > 0);
+
+  let mut ai = [0u8; 16];
+  ai[0] = 0x01;
+  ai[4] = if a_f_cnt_down { 0x02 } else { 0x01 };
+  ai[5] = dir_byte;
+  let mut addr = *dev_addr.as_bytes();
+  addr.reverse();
+  ai[6..10].copy_from_slice(&addr);
+  ai[10..14].copy_from_slice(&f_cnt_32.to_le_bytes());
+  ai[15] = 0x01;
+  let s = aes_ecb_encrypt(&ai, key);
+
+  input.iter().enumerate().map(|(i, b)| b ^ s[i]).collect()
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -406,5 +477,33 @@ mod tests {
     clone.frm_payload = Some(ct);
     let decrypted = clone.decrypt_payload(&app_s_key, &nwk_s_key, 0).unwrap();
     assert_eq!(decrypted, plain);
+  }
+
+  /// Vector from <https://pkg.go.dev/github.com/brocaar/lorawan>, mirrored in
+  /// `__tests__/fopts_test.ts`: "should encode packet with Lorawan11
+  /// Encrypted Fopts". Downlink with `FPort` > 0 means `aFCntDown` is true.
+  #[test]
+  fn encrypt_fopts_1_1_vector() {
+    use crate::codec::Data;
+    use crate::types::{Direction, FCtrl, NwkSEncKey};
+
+    let data = Data {
+      direction: Direction::Downlink,
+      confirmed: false,
+      dev_addr: DevAddr::new([0x01, 0x02, 0x03, 0x04]),
+      f_ctrl: FCtrl(0x03),
+      f_cnt: [0x00, 0x00],
+      f_opts: alloc::vec![0x02, 0x07, 0x01],
+      f_port: Some(1),
+      frm_payload: Some(alloc::vec![0x01, 0x02, 0x03, 0x04]),
+    };
+    let nwk_s_enc_key = NwkSEncKey::new([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 0]);
+    let encrypted = data.encrypt_fopts(&nwk_s_enc_key, 0).unwrap();
+    assert_eq!(encrypted, [0x22, 0xac, 0x0a]);
+
+    let mut clone = data.clone();
+    clone.f_opts = encrypted;
+    let decrypted = clone.decrypt_fopts(&nwk_s_enc_key, 0).unwrap();
+    assert_eq!(decrypted, [0x02, 0x07, 0x01]);
   }
 }
