@@ -77,6 +77,30 @@ pub(crate) fn calculate_join_accept_mic_1_0(mhdr_and_body: &[u8], key: &[u8; 16]
   cmac4(key, mhdr_and_body)
 }
 
+/// Compute the Join Accept MIC for `LoRaWAN` 1.1 with `OptNeg` set.
+///
+/// CMAC input is `JoinReqType(1) || JoinEUI_LE(8) || DevNonce_LE(2) ||
+/// MHDR(1) || MACPayload(N)`. The key is `JSIntKey`.
+#[allow(dead_code, clippy::trivially_copy_pass_by_ref)] // wired up in Task 8.8 dispatcher; refs match public surface
+pub(crate) fn calculate_join_accept_mic_1_1(
+  mhdr_and_body: &[u8],
+  js_int_key: &[u8; 16],
+  join_req_type: u8,
+  join_eui: &AppEui,
+  dev_nonce: &DevNonce,
+) -> [u8; 4] {
+  let mut input = alloc::vec::Vec::with_capacity(11 + mhdr_and_body.len());
+  input.push(join_req_type);
+  let mut eui = *join_eui.as_bytes();
+  eui.reverse();
+  input.extend_from_slice(&eui);
+  let mut nonce = *dev_nonce.as_bytes();
+  nonce.reverse();
+  input.extend_from_slice(&nonce);
+  input.extend_from_slice(mhdr_and_body);
+  cmac4(js_int_key, &input)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -117,6 +141,17 @@ mod tests {
     assert_eq!(m1, m2);
     // Cross-check against the same construction with all-zero inputs.
     assert_eq!(m1, [0xf8, 0x6f, 0x0a, 0x91]);
+  }
+
+  #[test]
+  fn join_accept_mic_1_1_distinct_from_1_0() {
+    let mhdr_and_body = [0x20u8; 13];
+    let js_key = JSIntKey::new([0u8; 16]);
+    let join_eui = AppEui::new([0u8; 8]);
+    let dev_nonce = DevNonce::new([0u8; 2]);
+    let mic = calculate_join_accept_mic_1_1(&mhdr_and_body, js_key.as_bytes(), 0xFF, &join_eui, &dev_nonce);
+    let mic2 = calculate_join_accept_mic_1_1(&mhdr_and_body, js_key.as_bytes(), 0x00, &join_eui, &dev_nonce);
+    assert_ne!(mic, mic2); // JoinReqType changes the MIC
   }
 
   fn hex_to_vec(s: &str) -> Vec<u8> {
