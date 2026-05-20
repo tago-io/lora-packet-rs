@@ -77,6 +77,40 @@ pub(crate) fn calculate_join_accept_mic_1_0(mhdr_and_body: &[u8], key: &[u8; 16]
   cmac4(key, mhdr_and_body)
 }
 
+/// Compute the Data MIC for `LoRaWAN` 1.0 (uplink and downlink).
+///
+/// Builds the 16-byte B0 prefix per the `LoRaWAN` 1.0 spec and CMACs
+/// `B0 || MHDR || MACPayload` with `NwkSKey`.
+///
+/// `f_cnt_msb` is the upper 16 bits of the 32-bit frame counter (the wire
+/// carries only the low 16 bits).
+#[allow(dead_code)] // wired up in Task 8.8 dispatcher
+pub(crate) fn calculate_data_mic_1_0(packet: &crate::codec::LoraPacket, key: &[u8; 16], f_cnt_msb: u16) -> [u8; 4] {
+  let crate::codec::Payload::Data(data) = &packet.payload else {
+    unreachable!("calculate_data_mic_1_0 called on non-data packet");
+  };
+
+  let mhdr_and_body = &packet.phy_payload[..packet.phy_payload.len() - 4];
+  let dir_byte = u8::from(!matches!(data.direction, crate::types::Direction::Uplink));
+  let f_cnt_32 = data.f_cnt_32(f_cnt_msb);
+  let mut addr = *data.dev_addr.as_bytes();
+  addr.reverse();
+
+  let mut input = alloc::vec::Vec::with_capacity(16 + mhdr_and_body.len());
+  // B0
+  input.push(0x49);
+  input.extend_from_slice(&[0, 0, 0, 0]); // bytes 1..5 zero in 1.0
+  input.push(dir_byte);
+  input.extend_from_slice(&addr);
+  input.extend_from_slice(&f_cnt_32.to_le_bytes());
+  input.push(0x00);
+  input.push(u8::try_from(mhdr_and_body.len()).unwrap_or(0xFF));
+  // MHDR || MACPayload
+  input.extend_from_slice(mhdr_and_body);
+
+  cmac4(key, &input)
+}
+
 /// Compute the Join Accept MIC for `LoRaWAN` 1.1 with `OptNeg` set.
 ///
 /// CMAC input is `JoinReqType(1) || JoinEUI_LE(8) || DevNonce_LE(2) ||
@@ -141,6 +175,36 @@ mod tests {
     assert_eq!(m1, m2);
     // Cross-check against the same construction with all-zero inputs.
     assert_eq!(m1, [0xf8, 0x6f, 0x0a, 0x91]);
+  }
+
+  #[test]
+  fn data_mic_1_0_uplink() {
+    use crate::codec::LoraPacket;
+    let bytes = hex_to_vec("40F17DBE4900020001954378762B11FF0D");
+    let packet = LoraPacket::from_wire(&bytes).unwrap();
+    let nwk_s_key = NwkSKey::new(hex_to_arr_16("44024241ed4ce9a68c6a8bc055233fd3"));
+    let mic = calculate_data_mic_1_0(&packet, nwk_s_key.as_bytes(), 0);
+    assert_eq!(mic, [0x2b, 0x11, 0xff, 0x0d]);
+  }
+
+  #[test]
+  fn data_mic_1_0_uplink_short() {
+    use crate::codec::LoraPacket;
+    let bytes = hex_to_vec("40F17DBE49000300012A3518AF");
+    let packet = LoraPacket::from_wire(&bytes).unwrap();
+    let nwk_s_key = NwkSKey::new(hex_to_arr_16("44024241ed4ce9a68c6a8bc055233fd3"));
+    let mic = calculate_data_mic_1_0(&packet, nwk_s_key.as_bytes(), 0);
+    assert_eq!(mic, [0x2a, 0x35, 0x18, 0xaf]);
+  }
+
+  #[test]
+  fn data_mic_1_0_confirmed_ack() {
+    use crate::codec::LoraPacket;
+    let bytes = hex_to_vec("60f17dbe4920020001f9d65d27");
+    let packet = LoraPacket::from_wire(&bytes).unwrap();
+    let nwk_s_key = NwkSKey::new(hex_to_arr_16("44024241ed4ce9a68c6a8bc055233fd3"));
+    let mic = calculate_data_mic_1_0(&packet, nwk_s_key.as_bytes(), 0);
+    assert_eq!(mic, [0xf9, 0xd6, 0x5d, 0x27]);
   }
 
   #[test]
