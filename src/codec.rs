@@ -1116,4 +1116,26 @@ mod tests {
     assert_eq!(&wire[9..13], &[0x95, 0x43, 0x78, 0x76]);
     assert_eq!(&wire[wire.len() - 4..], &[0, 0, 0, 0]);
   }
+
+  #[test]
+  fn round_trip_data_up() {
+    let wire = hex_to_vec("40f17dbe4900020001954378762b11ff0d");
+    let p = LoraPacket::from_wire(&wire).unwrap();
+    let emitted = p.to_wire();
+    assert_eq!(emitted, wire);
+  }
+
+  #[test]
+  fn round_trip_join_request() {
+    let wire = hex_to_vec("0039363463336913aa05693574323831338ef1c1d5ec6c");
+    let p = LoraPacket::from_wire(&wire).unwrap();
+    assert_eq!(p.to_wire(), wire);
+  }
+
+  #[test]
+  fn round_trip_rejoin_type_0() {
+    let wire = hex_to_vec("c0000102030405060708090a0b0c0ddeadbeef");
+    let p = LoraPacket::from_wire(&wire).unwrap();
+    assert_eq!(p.to_wire(), wire);
+  }
 }
