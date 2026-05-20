@@ -393,6 +393,77 @@ fn parse_data(m_type: MType, body: &[u8]) -> crate::Result<Data> {
   })
 }
 
+/// Builder for assembling a `LoraPacket` field-by-field.
+#[derive(Debug, Default, Clone)]
+#[allow(dead_code)]
+pub struct LoraPacketBuilder {
+  m_type: Option<MType>,
+  major: u8,
+  direction: Option<Direction>,
+  confirmed: bool,
+  dev_addr: Option<DevAddr>,
+  f_ctrl: Option<FCtrl>,
+  f_cnt: Option<u16>,
+  f_opts: Vec<u8>,
+  f_port: Option<u8>,
+  payload: Option<Vec<u8>>,
+  join_eui: Option<AppEui>,
+  dev_eui: Option<DevEui>,
+  dev_nonce: Option<DevNonce>,
+  join_nonce: Option<AppNonce>,
+  net_id: Option<NetId>,
+  dl_settings: Option<DlSettings>,
+  rx_delay: Option<u8>,
+  cf_list: Option<[u8; 16]>,
+  join_req_type: Option<u8>,
+  rejoin_type: Option<u8>,
+}
+
+impl LoraPacket {
+  /// Begin building a packet field by field.
+  pub fn builder() -> LoraPacketBuilder {
+    LoraPacketBuilder::default()
+  }
+}
+
+impl LoraPacketBuilder {
+  /// Set message type and direction for a Data message.
+  #[must_use]
+  pub const fn data(mut self, direction: Direction, confirmed: bool) -> Self {
+    self.direction = Some(direction);
+    self.confirmed = confirmed;
+    self.m_type = Some(match (confirmed, direction) {
+      (false, Direction::Uplink) => MType::UnconfirmedDataUp,
+      (false, Direction::Downlink) => MType::UnconfirmedDataDown,
+      (true, Direction::Uplink) => MType::ConfirmedDataUp,
+      (true, Direction::Downlink) => MType::ConfirmedDataDown,
+    });
+    self
+  }
+
+  /// Begin a Join Request.
+  #[must_use]
+  pub const fn join_request(mut self) -> Self {
+    self.m_type = Some(MType::JoinRequest);
+    self
+  }
+
+  /// Begin a Join Accept.
+  #[must_use]
+  pub const fn join_accept(mut self) -> Self {
+    self.m_type = Some(MType::JoinAccept);
+    self
+  }
+
+  /// Begin a Rejoin Request with the given type (0, 1, or 2).
+  #[must_use]
+  pub const fn rejoin_request(mut self, rejoin_type: u8) -> Self {
+    self.m_type = Some(MType::RejoinRequest);
+    self.rejoin_type = Some(rejoin_type);
+    self
+  }
+}
+
 fn parse_rejoin_request(body: &[u8]) -> crate::Result<RejoinRequest> {
   if body.is_empty() {
     return Err(crate::Error::TooShort { expected: 1, got: 0 });
@@ -692,5 +763,10 @@ mod tests {
       _ => panic!("expected Proprietary"),
     }
     assert_eq!(p.mic, [0x11, 0x22, 0x33, 0x44]);
+  }
+
+  #[test]
+  fn builder_constructs() {
+    let _b = LoraPacket::builder().data(Direction::Uplink, false);
   }
 }

@@ -16,7 +16,7 @@ pub mod error;
 pub mod types;
 mod util;
 
-pub use codec::{Data, JoinAccept, JoinRequest, LoraPacket, Payload, RejoinRequest};
+pub use codec::{Data, JoinAccept, JoinRequest, LoraPacket, LoraPacketBuilder, Payload, RejoinRequest};
 pub use error::{Error, Result};
 pub use types::{
   AppEui, AppKey, AppNonce, AppSKey, DevAddr, DevEui, DevNonce, Direction, DlSettings, FCtrl, FNwkSIntKey, JSEncKey,
