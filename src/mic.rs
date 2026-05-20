@@ -164,6 +164,17 @@ pub(crate) fn calculate_data_mic_1_1_uplink(
   [cmac_s[0], cmac_s[1], cmac_f[0], cmac_f[1]]
 }
 
+/// Compute the Rejoin Request MIC (types 0/1/2).
+///
+/// CMAC input is `MHDR || RejoinBody` (everything in `phy_payload` except the
+/// 4-byte MIC). The caller chooses the key per rejoin type: `SNwkSIntKey` for
+/// types 0 and 2, `JSIntKey` for type 1.
+#[allow(dead_code)] // wired up in Task 8.8 dispatcher
+pub(crate) fn calculate_rejoin_mic(packet: &crate::codec::LoraPacket, key: &[u8; 16]) -> [u8; 4] {
+  let bytes = &packet.phy_payload[..packet.phy_payload.len() - 4];
+  cmac4(key, bytes)
+}
+
 /// Compute the Data MIC for `LoRaWAN` 1.1 downlink.
 ///
 /// B0-style block with bytes 1..5 = `ConfFCntDown`||TxDr||TxCh (or all zero
@@ -292,6 +303,17 @@ mod tests {
     let nwk_s_key = NwkSKey::new(hex_to_arr_16("44024241ed4ce9a68c6a8bc055233fd3"));
     let mic = calculate_data_mic_1_0(&packet, nwk_s_key.as_bytes(), 0);
     assert_eq!(mic, [0xf9, 0xd6, 0x5d, 0x27]);
+  }
+
+  #[test]
+  fn rejoin_mic_deterministic() {
+    use crate::codec::LoraPacket;
+    let bytes = hex_to_vec("c0000102030405060708090a0b0c0ddeadbeef");
+    let packet = LoraPacket::from_wire(&bytes).unwrap();
+    let s_key = SNwkSIntKey::new([0u8; 16]);
+    let mic = calculate_rejoin_mic(&packet, s_key.as_bytes());
+    let mic2 = calculate_rejoin_mic(&packet, s_key.as_bytes());
+    assert_eq!(mic, mic2);
   }
 
   #[test]
