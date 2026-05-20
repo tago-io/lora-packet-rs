@@ -257,6 +257,61 @@ impl LoraPacket {
   }
 }
 
+impl JoinAccept {
+  /// Parse an already-decrypted Join Accept (MHDR + body + MIC).
+  ///
+  /// Use `JoinAccept::decrypt_from_wire` (Phase 6) when starting from
+  /// encrypted wire bytes.
+  ///
+  /// # Errors
+  /// `Error::TooShort` if the total length is below 17 or the body is neither 12 nor 28 bytes.
+  pub fn from_plaintext(bytes: &[u8]) -> crate::Result<Self> {
+    if bytes.len() < 17 {
+      return Err(crate::Error::TooShort {
+        expected: 17,
+        got: bytes.len(),
+      });
+    }
+    let body = &bytes[1..bytes.len() - 4];
+    if body.len() != 12 && body.len() != 28 {
+      return Err(crate::Error::TooShort {
+        expected: 12,
+        got: body.len(),
+      });
+    }
+
+    let mut join_nonce = [0u8; 3];
+    join_nonce.copy_from_slice(&body[0..3]);
+    join_nonce.reverse();
+    let mut net_id = [0u8; 3];
+    net_id.copy_from_slice(&body[3..6]);
+    net_id.reverse();
+    let mut dev_addr = [0u8; 4];
+    dev_addr.copy_from_slice(&body[6..10]);
+    dev_addr.reverse();
+    let dl_settings = DlSettings(body[10]);
+    let rx_delay = body[11];
+
+    let cf_list = if body.len() == 28 {
+      let mut cf = [0u8; 16];
+      cf.copy_from_slice(&body[12..28]);
+      Some(cf)
+    } else {
+      None
+    };
+
+    Ok(Self {
+      join_nonce: AppNonce::new(join_nonce),
+      net_id: NetId::new(net_id),
+      dev_addr: DevAddr::new(dev_addr),
+      dl_settings,
+      rx_delay,
+      cf_list,
+      join_req_type: None,
+    })
+  }
+}
+
 fn parse_join_request(body: &[u8]) -> crate::Result<JoinRequest> {
   if body.len() != 18 {
     return Err(crate::Error::TooShort {
@@ -469,6 +524,36 @@ mod tests {
       .step_by(2)
       .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex"))
       .collect()
+  }
+
+  #[test]
+  fn parse_join_accept_plaintext_minimum() {
+    let plaintext = hex_to_vec("20010203040506070809100001deadbeef");
+    let ja = JoinAccept::from_plaintext(&plaintext).unwrap();
+    assert_eq!(ja.join_nonce.as_bytes(), &[0x03, 0x02, 0x01]);
+    assert_eq!(ja.net_id.as_bytes(), &[0x06, 0x05, 0x04]);
+    assert_eq!(ja.dev_addr.as_bytes(), &[0x10, 0x09, 0x08, 0x07]);
+    assert_eq!(ja.dl_settings.as_byte(), 0x00);
+    assert_eq!(ja.rx_delay, 0x01);
+    assert!(ja.cf_list.is_none());
+    assert!(ja.join_req_type.is_none());
+  }
+
+  #[test]
+  fn parse_join_accept_plaintext_with_cflist() {
+    let plaintext = hex_to_vec(concat!(
+      "20",
+      "010203040506070809100001",
+      "112233445566778899aabbccddeeff00",
+      "deadbeef"
+    ));
+    let ja = JoinAccept::from_plaintext(&plaintext).unwrap();
+    assert_eq!(
+      ja.cf_list.unwrap(),
+      [
+        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00,
+      ]
+    );
   }
 
   /// Mirror of `__tests__/parse_test.ts`: "parses an unconfirmed data up"
