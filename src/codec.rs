@@ -213,6 +213,68 @@ impl Data {
   }
 }
 
+impl LoraPacket {
+  /// Parse a complete `PHYPayload` from wire bytes.
+  ///
+  /// # Errors
+  /// - `Error::TooShort` if the buffer is shorter than the minimum 5 bytes (MHDR + MIC).
+  /// - `Error::InvalidMType` if the MHDR encodes an unknown `MType`.
+  /// - `Error::InvalidRejoinType` if a Rejoin Request has type byte not in {0, 1, 2}.
+  pub fn from_wire(bytes: &[u8]) -> crate::Result<Self> {
+    if bytes.len() < 5 {
+      return Err(crate::Error::TooShort {
+        expected: 5,
+        got: bytes.len(),
+      });
+    }
+    let mhdr = Mhdr::new(bytes[0]);
+    let mic_offset = bytes.len() - 4;
+    let mut mic = [0u8; 4];
+    mic.copy_from_slice(&bytes[mic_offset..]);
+    let m_type = mhdr.m_type()?;
+    let body = &bytes[1..mic_offset];
+
+    let payload = match m_type {
+      MType::JoinRequest => Payload::JoinRequest(parse_join_request(body)?),
+      MType::JoinAccept => {
+        return Err(crate::Error::Other(alloc::string::String::from(
+          "JoinAccept parsing requires decrypt; use JoinAccept::decrypt_from_wire",
+        )));
+      }
+      MType::UnconfirmedDataUp | MType::UnconfirmedDataDown | MType::ConfirmedDataUp | MType::ConfirmedDataDown => {
+        Payload::Data(parse_data(m_type, body)?)
+      }
+      MType::RejoinRequest => Payload::RejoinRequest(parse_rejoin_request(body)?),
+      MType::Proprietary => Payload::Proprietary(body.to_vec()),
+    };
+
+    Ok(Self {
+      phy_payload: bytes.to_vec(),
+      mhdr,
+      mic,
+      payload,
+    })
+  }
+}
+
+fn parse_join_request(_body: &[u8]) -> crate::Result<JoinRequest> {
+  Err(crate::Error::Other(alloc::string::String::from(
+    "JoinRequest parser not yet implemented",
+  )))
+}
+
+fn parse_data(_m_type: MType, _body: &[u8]) -> crate::Result<Data> {
+  Err(crate::Error::Other(alloc::string::String::from(
+    "Data parser not yet implemented",
+  )))
+}
+
+fn parse_rejoin_request(_body: &[u8]) -> crate::Result<RejoinRequest> {
+  Err(crate::Error::Other(alloc::string::String::from(
+    "RejoinRequest parser not yet implemented",
+  )))
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -303,5 +365,17 @@ mod tests {
     assert_eq!(d.f_cnt(), 2);
     assert_eq!(d.f_cnt_32(0), 2);
     assert_eq!(d.f_cnt_32(1), 0x0001_0002);
+  }
+
+  #[test]
+  fn from_wire_rejects_empty() {
+    let err = LoraPacket::from_wire(&[]).unwrap_err();
+    assert!(matches!(err, crate::Error::TooShort { .. }));
+  }
+
+  #[test]
+  fn from_wire_rejects_too_short() {
+    let err = LoraPacket::from_wire(&[1, 2, 3, 4]).unwrap_err();
+    assert!(matches!(err, crate::Error::TooShort { .. }));
   }
 }
