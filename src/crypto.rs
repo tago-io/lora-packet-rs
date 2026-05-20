@@ -553,7 +553,7 @@ mod tests {
     let encrypted = data.encrypt_fopts(&nwk_s_enc_key, 0).unwrap();
     assert_eq!(encrypted, [0x22, 0xac, 0x0a]);
 
-    let mut clone = data.clone();
+    let mut clone = data;
     clone.f_opts = encrypted;
     let decrypted = clone.decrypt_fopts(&nwk_s_enc_key, 0).unwrap();
     assert_eq!(decrypted, [0x02, 0x07, 0x01]);

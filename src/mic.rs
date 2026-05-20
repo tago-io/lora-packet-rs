@@ -41,7 +41,6 @@ pub struct V1_1MicKeys<'a> {
 }
 
 /// Compute AES-CMAC-128 of `data` under `key` and return the first 4 bytes.
-#[allow(dead_code)] // wired up in later tasks
 pub(crate) fn cmac4(key: &[u8; 16], data: &[u8]) -> [u8; 4] {
   let mut mac = <Cmac<Aes128> as KeyInit>::new_from_slice(key).expect("16-byte AES key");
   mac.update(data);
@@ -52,9 +51,13 @@ pub(crate) fn cmac4(key: &[u8; 16], data: &[u8]) -> [u8; 4] {
 }
 
 /// Constant-time MIC comparison.
-#[allow(dead_code)] // wired up in later tasks
 pub(crate) fn mic_eq(a: [u8; 4], b: [u8; 4]) -> bool {
   a.ct_eq(&b).into()
+}
+
+/// Public-within-crate constant-time MIC compare for use by codec dispatchers.
+pub(crate) fn mic_eq_pub(a: [u8; 4], b: [u8; 4]) -> bool {
+  mic_eq(a, b)
 }
 
 /// Compute the Join Request MIC.
@@ -62,7 +65,6 @@ pub(crate) fn mic_eq(a: [u8; 4], b: [u8; 4]) -> bool {
 /// Same algorithm for `LoRaWAN` 1.0 and 1.1; only the key differs (`AppKey`
 /// for 1.0, `NwkKey` for 1.1). The CMAC input is `MHDR || JoinRequestBody`
 /// (everything in `phy_payload` except the 4-byte MIC).
-#[allow(dead_code)] // wired up in Task 8.8 dispatcher
 pub(crate) fn calculate_join_request_mic(packet: &crate::codec::LoraPacket, key: &[u8; 16]) -> [u8; 4] {
   let bytes = &packet.phy_payload[..packet.phy_payload.len() - 4];
   cmac4(key, bytes)
@@ -72,7 +74,6 @@ pub(crate) fn calculate_join_request_mic(packet: &crate::codec::LoraPacket, key:
 ///
 /// CMAC input is the plaintext `MHDR || JoinAcceptBody` (the Join Accept body
 /// is encrypted on the wire; pass the decrypted bytes). The key is `AppKey`.
-#[allow(dead_code)] // wired up in Task 8.8 dispatcher
 pub(crate) fn calculate_join_accept_mic_1_0(mhdr_and_body: &[u8], key: &[u8; 16]) -> [u8; 4] {
   cmac4(key, mhdr_and_body)
 }
@@ -84,7 +85,6 @@ pub(crate) fn calculate_join_accept_mic_1_0(mhdr_and_body: &[u8], key: &[u8; 16]
 ///
 /// `f_cnt_msb` is the upper 16 bits of the 32-bit frame counter (the wire
 /// carries only the low 16 bits).
-#[allow(dead_code)] // wired up in Task 8.8 dispatcher
 pub(crate) fn calculate_data_mic_1_0(packet: &crate::codec::LoraPacket, key: &[u8; 16], f_cnt_msb: u16) -> [u8; 4] {
   let crate::codec::Payload::Data(data) = &packet.payload else {
     unreachable!("calculate_data_mic_1_0 called on non-data packet");
@@ -118,7 +118,6 @@ pub(crate) fn calculate_data_mic_1_0(packet: &crate::codec::LoraPacket, key: &[u
 /// - B1 (bytes 1..5 = `ConfFCntDown`||TxDr||TxCh): CMAC under `SNwkSIntKey` -> `cmac_s`
 ///
 /// Final MIC = `cmac_s[0..2] || cmac_f[0..2]`.
-#[allow(dead_code)] // wired up in Task 8.8 dispatcher
 pub(crate) fn calculate_data_mic_1_1_uplink(
   packet: &crate::codec::LoraPacket,
   f_nwk_s_int_key: &[u8; 16],
@@ -169,7 +168,6 @@ pub(crate) fn calculate_data_mic_1_1_uplink(
 /// CMAC input is `MHDR || RejoinBody` (everything in `phy_payload` except the
 /// 4-byte MIC). The caller chooses the key per rejoin type: `SNwkSIntKey` for
 /// types 0 and 2, `JSIntKey` for type 1.
-#[allow(dead_code)] // wired up in Task 8.8 dispatcher
 pub(crate) fn calculate_rejoin_mic(packet: &crate::codec::LoraPacket, key: &[u8; 16]) -> [u8; 4] {
   let bytes = &packet.phy_payload[..packet.phy_payload.len() - 4];
   cmac4(key, bytes)
@@ -179,7 +177,6 @@ pub(crate) fn calculate_rejoin_mic(packet: &crate::codec::LoraPacket, key: &[u8;
 ///
 /// B0-style block with bytes 1..5 = `ConfFCntDown`||TxDr||TxCh (or all zero
 /// when absent). Key: `SNwkSIntKey`.
-#[allow(dead_code)] // wired up in Task 8.8 dispatcher
 pub(crate) fn calculate_data_mic_1_1_downlink(
   packet: &crate::codec::LoraPacket,
   s_nwk_s_int_key: &[u8; 16],
@@ -213,7 +210,7 @@ pub(crate) fn calculate_data_mic_1_1_downlink(
 ///
 /// CMAC input is `JoinReqType(1) || JoinEUI_LE(8) || DevNonce_LE(2) ||
 /// MHDR(1) || MACPayload(N)`. The key is `JSIntKey`.
-#[allow(dead_code, clippy::trivially_copy_pass_by_ref)] // wired up in Task 8.8 dispatcher; refs match public surface
+#[allow(clippy::trivially_copy_pass_by_ref)] // refs match the public-surface key/id newtypes
 pub(crate) fn calculate_join_accept_mic_1_1(
   mhdr_and_body: &[u8],
   js_int_key: &[u8; 16],
@@ -252,7 +249,7 @@ mod tests {
     assert!(!mic_eq([1, 2, 3, 4], [1, 2, 3, 5]));
   }
 
-  /// Mirror of __tests__/mic_test.ts: "should calculate & verify correct join request packet MIC in 1.1"
+  /// Mirror of `__tests__/mic_test.ts`: "should calculate & verify correct join request packet MIC in 1.1"
   #[test]
   fn join_request_mic_1_1_vector() {
     use crate::codec::LoraPacket;

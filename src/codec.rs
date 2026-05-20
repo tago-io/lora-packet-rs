@@ -199,6 +199,162 @@ impl LoraPacket {
       None
     }
   }
+
+  /// Verify the MIC using the `LoRaWAN` 1.0 key set.
+  ///
+  /// # Errors
+  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  pub fn verify_mic_v1_0(&self, keys: &crate::mic::V1_0MicKeys<'_>) -> crate::Result<bool> {
+    let calculated = self.calculate_mic_v1_0(keys)?;
+    Ok(crate::mic::mic_eq_pub(calculated, self.mic))
+  }
+
+  /// Verify the MIC using the `LoRaWAN` 1.1 key set.
+  ///
+  /// # Errors
+  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  pub fn verify_mic_v1_1(&self, keys: &crate::mic::V1_1MicKeys<'_>) -> crate::Result<bool> {
+    let calculated = self.calculate_mic_v1_1(keys)?;
+    Ok(crate::mic::mic_eq_pub(calculated, self.mic))
+  }
+
+  /// Calculate the MIC under `LoRaWAN` 1.0.
+  ///
+  /// # Errors
+  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  pub fn calculate_mic_v1_0(&self, keys: &crate::mic::V1_0MicKeys<'_>) -> crate::Result<[u8; 4]> {
+    match &self.payload {
+      Payload::Data(_) => {
+        let key = keys
+          .nwk_s_key
+          .ok_or(crate::Error::MissingKey("nwk_s_key required for Data MIC"))?;
+        Ok(crate::mic::calculate_data_mic_1_0(self, key.as_bytes(), keys.f_cnt_msb))
+      }
+      Payload::JoinRequest(_) => {
+        let key = keys
+          .app_key
+          .ok_or(crate::Error::MissingKey("app_key required for Join Request MIC"))?;
+        Ok(crate::mic::calculate_join_request_mic(self, key.as_bytes()))
+      }
+      Payload::JoinAccept(_) => {
+        let key = keys
+          .app_key
+          .ok_or(crate::Error::MissingKey("app_key required for Join Accept MIC"))?;
+        let mhdr_and_body = &self.phy_payload[..self.phy_payload.len() - 4];
+        Ok(crate::mic::calculate_join_accept_mic_1_0(mhdr_and_body, key.as_bytes()))
+      }
+      Payload::RejoinRequest(_) | Payload::Proprietary(_) => {
+        Err(crate::Error::MissingKey("use verify_mic_v1_1 for rejoin/proprietary"))
+      }
+    }
+  }
+
+  /// Calculate the MIC under `LoRaWAN` 1.1.
+  ///
+  /// # Errors
+  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  pub fn calculate_mic_v1_1(&self, keys: &crate::mic::V1_1MicKeys<'_>) -> crate::Result<[u8; 4]> {
+    match &self.payload {
+      Payload::Data(d) => match d.direction {
+        Direction::Uplink => {
+          let f_key = keys.f_nwk_s_int_key.ok_or(crate::Error::MissingKey(
+            "f_nwk_s_int_key required for Data uplink 1.1 MIC",
+          ))?;
+          let s_key = keys.s_nwk_s_int_key.ok_or(crate::Error::MissingKey(
+            "s_nwk_s_int_key required for Data uplink 1.1 MIC",
+          ))?;
+          let conf = keys.conf_fcnt_down_tx_dr_tx_ch.unwrap_or([0, 0, 0, 0]);
+          Ok(crate::mic::calculate_data_mic_1_1_uplink(
+            self,
+            f_key.as_bytes(),
+            s_key.as_bytes(),
+            keys.f_cnt_msb,
+            conf,
+          ))
+        }
+        Direction::Downlink => {
+          let s_key = keys.s_nwk_s_int_key.ok_or(crate::Error::MissingKey(
+            "s_nwk_s_int_key required for Data downlink 1.1 MIC",
+          ))?;
+          let conf = keys.conf_fcnt_down_tx_dr_tx_ch.unwrap_or([0, 0, 0, 0]);
+          Ok(crate::mic::calculate_data_mic_1_1_downlink(
+            self,
+            s_key.as_bytes(),
+            keys.f_cnt_msb,
+            conf,
+          ))
+        }
+      },
+      Payload::JoinRequest(_) => {
+        let key = keys
+          .nwk_key
+          .ok_or(crate::Error::MissingKey("nwk_key required for Join Request 1.1 MIC"))?;
+        Ok(crate::mic::calculate_join_request_mic(self, key.as_bytes()))
+      }
+      Payload::JoinAccept(_) => {
+        let js_key = keys
+          .js_int_key
+          .ok_or(crate::Error::MissingKey("js_int_key required for Join Accept 1.1 MIC"))?;
+        let join_eui = keys
+          .join_eui
+          .ok_or(crate::Error::MissingKey("join_eui required for Join Accept 1.1 MIC"))?;
+        let dev_nonce = keys
+          .dev_nonce
+          .ok_or(crate::Error::MissingKey("dev_nonce required for Join Accept 1.1 MIC"))?;
+        let join_req_type = keys.join_req_type.unwrap_or(0xFF);
+        let mhdr_and_body = &self.phy_payload[..self.phy_payload.len() - 4];
+        Ok(crate::mic::calculate_join_accept_mic_1_1(
+          mhdr_and_body,
+          js_key.as_bytes(),
+          join_req_type,
+          &join_eui,
+          &dev_nonce,
+        ))
+      }
+      Payload::RejoinRequest(rj) => {
+        let key = match rj {
+          RejoinRequest::Type1 { .. } => keys
+            .js_int_key
+            .ok_or(crate::Error::MissingKey("js_int_key required for Rejoin Type 1 MIC"))?
+            .as_bytes(),
+          _ => keys
+            .s_nwk_s_int_key
+            .ok_or(crate::Error::MissingKey(
+              "s_nwk_s_int_key required for Rejoin Type 0/2 MIC",
+            ))?
+            .as_bytes(),
+        };
+        Ok(crate::mic::calculate_rejoin_mic(self, key))
+      }
+      Payload::Proprietary(_) => Err(crate::Error::MissingKey("Proprietary has no defined MIC")),
+    }
+  }
+
+  /// Recompute and overwrite the MIC under `LoRaWAN` 1.0.
+  ///
+  /// Also rewrites `phy_payload` so it includes the new MIC.
+  ///
+  /// # Errors
+  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  pub fn recalculate_mic_v1_0(&mut self, keys: &crate::mic::V1_0MicKeys<'_>) -> crate::Result<()> {
+    let mic = self.calculate_mic_v1_0(keys)?;
+    self.mic = mic;
+    self.phy_payload = self.to_wire();
+    Ok(())
+  }
+
+  /// Recompute and overwrite the MIC under `LoRaWAN` 1.1.
+  ///
+  /// Also rewrites `phy_payload` so it includes the new MIC.
+  ///
+  /// # Errors
+  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  pub fn recalculate_mic_v1_1(&mut self, keys: &crate::mic::V1_1MicKeys<'_>) -> crate::Result<()> {
+    let mic = self.calculate_mic_v1_1(keys)?;
+    self.mic = mic;
+    self.phy_payload = self.to_wire();
+    Ok(())
+  }
 }
 
 impl Data {
@@ -1137,5 +1293,39 @@ mod tests {
     let wire = hex_to_vec("c0000102030405060708090a0b0c0ddeadbeef");
     let p = LoraPacket::from_wire(&wire).unwrap();
     assert_eq!(p.to_wire(), wire);
+  }
+
+  #[test]
+  fn verify_mic_v1_0_real_vector() {
+    use crate::mic::V1_0MicKeys;
+    use crate::types::NwkSKey;
+    let bytes = hex_to_vec("40F17DBE4900020001954378762B11FF0D");
+    let packet = LoraPacket::from_wire(&bytes).unwrap();
+    let nwk_s_key = NwkSKey::from_slice(&hex_to_vec("44024241ed4ce9a68c6a8bc055233fd3")).unwrap();
+    let keys = V1_0MicKeys {
+      nwk_s_key: Some(&nwk_s_key),
+      ..Default::default()
+    };
+    assert!(packet.verify_mic_v1_0(&keys).unwrap());
+  }
+
+  #[test]
+  fn recalculate_mic_v1_0_updates_mic_and_phypayload() {
+    use crate::mic::V1_0MicKeys;
+    use crate::types::NwkSKey;
+    let bytes = hex_to_vec("40f17dbe490002000195437876eeeeeeee");
+    let mut packet = LoraPacket::from_wire(&bytes).unwrap();
+    assert_eq!(packet.mic, [0xee, 0xee, 0xee, 0xee]);
+    let nwk_s_key = NwkSKey::from_slice(&hex_to_vec("44024241ed4ce9a68c6a8bc055233fd3")).unwrap();
+    let keys = V1_0MicKeys {
+      nwk_s_key: Some(&nwk_s_key),
+      ..Default::default()
+    };
+    packet.recalculate_mic_v1_0(&keys).unwrap();
+    assert_eq!(packet.mic, [0x2b, 0x11, 0xff, 0x0d]);
+    assert_eq!(
+      &packet.phy_payload[packet.phy_payload.len() - 4..],
+      &[0x2b, 0x11, 0xff, 0x0d]
+    );
   }
 }
