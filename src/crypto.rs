@@ -5,7 +5,8 @@ use aes::Aes128;
 use aes::cipher::{Array, BlockCipherEncrypt, KeyInit};
 
 use crate::types::{
-  AppEui, AppKey, AppNonce, AppSKey, DevNonce, FNwkSIntKey, NetId, NwkKey, NwkSEncKey, NwkSKey, SNwkSIntKey,
+  AppEui, AppKey, AppNonce, AppSKey, DevEui, DevNonce, FNwkSIntKey, JSEncKey, JSIntKey, NetId, NwkKey, NwkSEncKey,
+  NwkSKey, SNwkSIntKey,
 };
 
 /// Encrypt one 16-byte block under AES-128 ECB. The low-level primitive.
@@ -141,6 +142,31 @@ fn derive_session_key_11(
   aes_ecb_encrypt(&block, key)
 }
 
+/// Join Server keys derived from `NwkKey` and `DevEUI`.
+#[derive(Debug, Clone)]
+pub struct JoinServerKeys {
+  /// Integrity key for Join Server operations.
+  pub js_int_key: JSIntKey,
+  /// Encryption key for Join Server operations.
+  pub js_enc_key: JSEncKey,
+}
+
+impl JoinServerKeys {
+  /// Derive both JS keys.
+  #[allow(clippy::trivially_copy_pass_by_ref)]
+  pub fn derive(nwk_key: &NwkKey, dev_eui: &DevEui) -> Self {
+    let mut block = [0u8; 16];
+    block[0] = 0x06;
+    let mut e = *dev_eui.as_bytes();
+    e.reverse();
+    block[1..9].copy_from_slice(&e);
+    let js_int_key = JSIntKey::new(aes_ecb_encrypt(&block, nwk_key.as_bytes()));
+    block[0] = 0x05;
+    let js_enc_key = JSEncKey::new(aes_ecb_encrypt(&block, nwk_key.as_bytes()));
+    Self { js_int_key, js_enc_key }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -187,5 +213,13 @@ mod tests {
     assert_ne!(k.app_s_key.as_bytes(), k.f_nwk_s_int_key.as_bytes());
     assert_ne!(k.f_nwk_s_int_key.as_bytes(), k.s_nwk_s_int_key.as_bytes());
     assert_ne!(k.s_nwk_s_int_key.as_bytes(), k.nwk_s_enc_key.as_bytes());
+  }
+
+  #[test]
+  fn js_keys_distinct() {
+    let nwk_key = NwkKey::new([0x42u8; 16]);
+    let dev_eui = DevEui::new([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
+    let k = JoinServerKeys::derive(&nwk_key, &dev_eui);
+    assert_ne!(k.js_int_key.as_bytes(), k.js_enc_key.as_bytes());
   }
 }
