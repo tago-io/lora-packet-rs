@@ -281,10 +281,61 @@ fn parse_join_request(body: &[u8]) -> crate::Result<JoinRequest> {
   })
 }
 
-fn parse_data(_m_type: MType, _body: &[u8]) -> crate::Result<Data> {
-  Err(crate::Error::Other(alloc::string::String::from(
-    "Data parser not yet implemented",
-  )))
+fn parse_data(m_type: MType, body: &[u8]) -> crate::Result<Data> {
+  if body.len() < 7 {
+    return Err(crate::Error::TooShort {
+      expected: 7,
+      got: body.len(),
+    });
+  }
+
+  let mut dev_addr = [0u8; 4];
+  dev_addr.copy_from_slice(&body[0..4]);
+  dev_addr.reverse();
+  let f_ctrl = FCtrl(body[4]);
+  let mut f_cnt = [0u8; 2];
+  f_cnt.copy_from_slice(&body[5..7]);
+
+  let f_opts_len = f_ctrl.f_opts_len() as usize;
+  if 7 + f_opts_len > body.len() {
+    return Err(crate::Error::TooShort {
+      expected: 7 + f_opts_len,
+      got: body.len(),
+    });
+  }
+  let f_opts = body[7..7 + f_opts_len].to_vec();
+
+  let remainder_start = 7 + f_opts_len;
+  let (f_port, frm_payload) = if remainder_start >= body.len() {
+    (None, None)
+  } else {
+    let port = body[remainder_start];
+    let payload = if remainder_start + 1 < body.len() {
+      Some(body[remainder_start + 1..].to_vec())
+    } else {
+      Some(Vec::new())
+    };
+    (Some(port), payload)
+  };
+
+  let (direction, confirmed) = match m_type {
+    MType::UnconfirmedDataUp => (Direction::Uplink, false),
+    MType::ConfirmedDataUp => (Direction::Uplink, true),
+    MType::UnconfirmedDataDown => (Direction::Downlink, false),
+    MType::ConfirmedDataDown => (Direction::Downlink, true),
+    _ => unreachable!("parse_data called with non-data MType"),
+  };
+
+  Ok(Data {
+    direction,
+    confirmed,
+    dev_addr: DevAddr::new(dev_addr),
+    f_ctrl,
+    f_cnt,
+    f_opts,
+    f_port,
+    frm_payload,
+  })
 }
 
 fn parse_rejoin_request(_body: &[u8]) -> crate::Result<RejoinRequest> {
@@ -418,5 +469,23 @@ mod tests {
       .step_by(2)
       .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex"))
       .collect()
+  }
+
+  /// Mirror of `__tests__/parse_test.ts`: "parses an unconfirmed data up"
+  #[test]
+  fn parse_data_up_known_vector() {
+    let bytes = hex_to_vec("40f17dbe4900020001954378762b11ff0d");
+    let p = LoraPacket::from_wire(&bytes).unwrap();
+    assert_eq!(p.mhdr.as_byte(), 0x40);
+    assert_eq!(p.mic, [0x2b, 0x11, 0xff, 0x0d]);
+    let d = p.as_data().expect("expected Data");
+    assert_eq!(d.direction, Direction::Uplink);
+    assert!(!d.confirmed);
+    assert_eq!(d.dev_addr.as_bytes(), &[0x49, 0xbe, 0x7d, 0xf1]);
+    assert_eq!(d.f_ctrl.as_byte(), 0x00);
+    assert_eq!(d.f_cnt(), 2);
+    assert!(d.f_opts.is_empty());
+    assert_eq!(d.f_port, Some(0x01));
+    assert_eq!(d.frm_payload.as_deref(), Some(&[0x95, 0x43, 0x78, 0x76][..]));
   }
 }
