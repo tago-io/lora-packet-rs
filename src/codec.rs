@@ -393,10 +393,68 @@ fn parse_data(m_type: MType, body: &[u8]) -> crate::Result<Data> {
   })
 }
 
-fn parse_rejoin_request(_body: &[u8]) -> crate::Result<RejoinRequest> {
-  Err(crate::Error::Other(alloc::string::String::from(
-    "RejoinRequest parser not yet implemented",
-  )))
+fn parse_rejoin_request(body: &[u8]) -> crate::Result<RejoinRequest> {
+  if body.is_empty() {
+    return Err(crate::Error::TooShort { expected: 1, got: 0 });
+  }
+  let rejoin_type = body[0];
+  match rejoin_type {
+    0 | 2 => {
+      if body.len() != 14 {
+        return Err(crate::Error::TooShort {
+          expected: 14,
+          got: body.len(),
+        });
+      }
+      let mut net_id = [0u8; 3];
+      net_id.copy_from_slice(&body[1..4]);
+      net_id.reverse();
+      let mut dev_eui = [0u8; 8];
+      dev_eui.copy_from_slice(&body[4..12]);
+      dev_eui.reverse();
+      let mut rj_count_0 = [0u8; 2];
+      rj_count_0.copy_from_slice(&body[12..14]);
+      rj_count_0.reverse();
+      let dev_eui = DevEui::new(dev_eui);
+      let net_id = NetId::new(net_id);
+      if rejoin_type == 0 {
+        Ok(RejoinRequest::Type0 {
+          net_id,
+          dev_eui,
+          rj_count_0,
+        })
+      } else {
+        Ok(RejoinRequest::Type2 {
+          net_id,
+          dev_eui,
+          rj_count_0,
+        })
+      }
+    }
+    1 => {
+      if body.len() != 19 {
+        return Err(crate::Error::TooShort {
+          expected: 19,
+          got: body.len(),
+        });
+      }
+      let mut join_eui = [0u8; 8];
+      join_eui.copy_from_slice(&body[1..9]);
+      join_eui.reverse();
+      let mut dev_eui = [0u8; 8];
+      dev_eui.copy_from_slice(&body[9..17]);
+      dev_eui.reverse();
+      let mut rj_count_1 = [0u8; 2];
+      rj_count_1.copy_from_slice(&body[17..19]);
+      rj_count_1.reverse();
+      Ok(RejoinRequest::Type1 {
+        join_eui: AppEui::new(join_eui),
+        dev_eui: DevEui::new(dev_eui),
+        rj_count_1,
+      })
+    }
+    other => Err(crate::Error::InvalidRejoinType(other)),
+  }
 }
 
 #[cfg(test)]
@@ -572,5 +630,56 @@ mod tests {
     assert!(d.f_opts.is_empty());
     assert_eq!(d.f_port, Some(0x01));
     assert_eq!(d.frm_payload.as_deref(), Some(&[0x95, 0x43, 0x78, 0x76][..]));
+  }
+
+  #[test]
+  fn parse_rejoin_type_0() {
+    let bytes = hex_to_vec("c0000102030405060708090a0b0c0ddeadbeef");
+    let p = LoraPacket::from_wire(&bytes).unwrap();
+    let rj = p.as_rejoin_request().expect("rejoin");
+    match rj {
+      RejoinRequest::Type0 {
+        net_id,
+        dev_eui,
+        rj_count_0,
+      } => {
+        assert_eq!(net_id.as_bytes(), &[0x03, 0x02, 0x01]);
+        assert_eq!(dev_eui.as_bytes(), &[0x0b, 0x0a, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04]);
+        assert_eq!(rj_count_0, &[0x0d, 0x0c]);
+      }
+      _ => panic!("expected Type0"),
+    }
+  }
+
+  #[test]
+  fn parse_rejoin_type_1() {
+    let bytes = hex_to_vec("c001aaaaaaaaaaaaaaaa0405060708090a0b0c0ddeadbeef");
+    let p = LoraPacket::from_wire(&bytes).unwrap();
+    match p.as_rejoin_request().unwrap() {
+      RejoinRequest::Type1 {
+        join_eui,
+        dev_eui,
+        rj_count_1,
+      } => {
+        assert_eq!(join_eui.as_bytes(), &[0xaa; 8]);
+        assert_eq!(dev_eui.as_bytes(), &[0x0b, 0x0a, 0x09, 0x08, 0x07, 0x06, 0x05, 0x04]);
+        assert_eq!(rj_count_1, &[0x0d, 0x0c]);
+      }
+      _ => panic!("expected Type1"),
+    }
+  }
+
+  #[test]
+  fn parse_rejoin_type_2() {
+    let bytes = hex_to_vec("c0020102030405060708090a0b0c0ddeadbeef");
+    let p = LoraPacket::from_wire(&bytes).unwrap();
+    assert!(matches!(p.as_rejoin_request().unwrap(), RejoinRequest::Type2 { .. }));
+  }
+
+  #[test]
+  fn parse_rejoin_invalid_type() {
+    let bytes = hex_to_vec("c0030102030405060708090a0b0c0ddeadbeef");
+    let err = LoraPacket::from_wire(&bytes).unwrap_err();
+    assert!(matches!(err, crate::Error::InvalidRejoinType(3)));
   }
 }
