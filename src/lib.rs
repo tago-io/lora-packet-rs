@@ -12,6 +12,8 @@
 extern crate alloc;
 
 pub mod error;
+pub mod types;
 mod util;
 
 pub use error::{Error, Result};
+pub use types::{Direction, LorawanVersion, MType};
