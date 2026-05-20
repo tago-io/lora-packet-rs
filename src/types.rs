@@ -256,6 +256,96 @@ id_newtype!(
 /// `LoRaWAN` 1.1 spec alias for `AppNonce`.
 pub use AppNonce as JoinNonce;
 
+/// Internal macro: declare a 16-byte key newtype with redacted Debug,
+/// explicit `Zeroize`, and the standard constructor/accessor surface.
+macro_rules! key_newtype {
+  ($(#[$meta:meta])* $name:ident) => {
+    $(#[$meta])*
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, zeroize::Zeroize)]
+    pub struct $name([u8; 16]);
+
+    impl $name {
+      /// Construct from a 16-byte array.
+      pub const fn new(bytes: [u8; 16]) -> Self {
+        Self(bytes)
+      }
+
+      /// Construct from a slice, validating the length.
+      ///
+      /// # Errors
+      /// Returns [`Error::InvalidKeyLength`] when the slice is not 16 bytes.
+      pub fn from_slice(s: &[u8]) -> Result<Self> {
+        if s.len() != 16 {
+          return Err(Error::InvalidKeyLength { expected: 16, got: s.len() });
+        }
+        let mut arr = [0u8; 16];
+        arr.copy_from_slice(s);
+        Ok(Self(arr))
+      }
+
+      /// Borrow the raw key bytes.
+      pub const fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
+      }
+    }
+
+    impl core::fmt::Debug for $name {
+      fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, concat!(stringify!($name), "(***)"))
+      }
+    }
+  };
+}
+
+key_newtype!(
+  /// `LoRaWAN` 1.0 root application key.
+  AppKey
+);
+key_newtype!(
+  /// `LoRaWAN` 1.1 root network key.
+  NwkKey
+);
+key_newtype!(
+  /// Application session key (`FRMPayload` crypt with `FPort` > 0).
+  AppSKey
+);
+key_newtype!(
+  /// Network session key (1.0; `FRMPayload` crypt with `FPort` = 0 and MIC).
+  NwkSKey
+);
+key_newtype!(
+  /// Forwarding network session integrity key (1.1 uplink MIC).
+  FNwkSIntKey
+);
+key_newtype!(
+  /// Serving network session integrity key (1.1).
+  SNwkSIntKey
+);
+key_newtype!(
+  /// Network session encryption key (1.1 `FOpts` crypt).
+  NwkSEncKey
+);
+key_newtype!(
+  /// Join Server integrity key (1.1).
+  JSIntKey
+);
+key_newtype!(
+  /// Join Server encryption key (1.1).
+  JSEncKey
+);
+key_newtype!(
+  /// Root WOR / Relay session key.
+  RootWorSKey
+);
+key_newtype!(
+  /// WOR session integrity key.
+  WorSIntKey
+);
+key_newtype!(
+  /// WOR session encryption key.
+  WorSEncKey
+);
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -346,5 +436,41 @@ mod tests {
   fn dev_nonce_two_bytes() {
     let n = DevNonce::from_slice(&[0xF1, 0x8E]).unwrap();
     assert_eq!(n.as_bytes(), &[0xF1, 0x8E]);
+  }
+
+  use alloc::format;
+
+  #[test]
+  fn app_key_from_slice_ok() {
+    let k = AppKey::from_slice(&[0u8; 16]).unwrap();
+    assert_eq!(k.as_bytes(), &[0u8; 16]);
+  }
+
+  #[test]
+  fn app_key_from_slice_wrong_length() {
+    let e = AppKey::from_slice(&[0u8; 15]).unwrap_err();
+    match e {
+      Error::InvalidKeyLength { expected, got } => {
+        assert_eq!(expected, 16);
+        assert_eq!(got, 15);
+      }
+      _ => panic!("wrong error variant"),
+    }
+  }
+
+  #[test]
+  fn key_debug_is_redacted() {
+    let k = AppSKey::new([0xAB; 16]);
+    let s = format!("{k:?}");
+    assert_eq!(s, "AppSKey(***)");
+    assert!(!s.contains("ab"));
+  }
+
+  #[test]
+  fn key_zeroize_wipes_bytes() {
+    use zeroize::Zeroize;
+    let mut k = NwkSKey::new([0xFFu8; 16]);
+    k.zeroize();
+    assert_eq!(k.as_bytes(), &[0u8; 16]);
   }
 }

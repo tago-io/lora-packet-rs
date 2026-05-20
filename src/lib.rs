@@ -17,6 +17,7 @@ mod util;
 
 pub use error::{Error, Result};
 pub use types::{
-  AppEui, AppNonce, DevAddr, DevEui, DevNonce, Direction, DlSettings, FCtrl, JoinEui, JoinNonce,
-  LorawanVersion, MType, Mhdr, NetId,
+  AppEui, AppKey, AppNonce, AppSKey, DevAddr, DevEui, DevNonce, Direction, DlSettings, FCtrl, FNwkSIntKey, JSEncKey,
+  JSIntKey, JoinEui, JoinNonce, LorawanVersion, MType, Mhdr, NetId, NwkKey, NwkSEncKey, NwkSKey, RootWorSKey,
+  SNwkSIntKey, WorSEncKey, WorSIntKey,
 };
