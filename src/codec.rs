@@ -257,10 +257,28 @@ impl LoraPacket {
   }
 }
 
-fn parse_join_request(_body: &[u8]) -> crate::Result<JoinRequest> {
-  Err(crate::Error::Other(alloc::string::String::from(
-    "JoinRequest parser not yet implemented",
-  )))
+fn parse_join_request(body: &[u8]) -> crate::Result<JoinRequest> {
+  if body.len() != 18 {
+    return Err(crate::Error::TooShort {
+      expected: 18,
+      got: body.len(),
+    });
+  }
+  let mut app_eui = [0u8; 8];
+  app_eui.copy_from_slice(&body[0..8]);
+  app_eui.reverse();
+  let mut dev_eui = [0u8; 8];
+  dev_eui.copy_from_slice(&body[8..16]);
+  dev_eui.reverse();
+  let mut dev_nonce = [0u8; 2];
+  dev_nonce.copy_from_slice(&body[16..18]);
+  dev_nonce.reverse();
+
+  Ok(JoinRequest {
+    join_eui: AppEui::new(app_eui),
+    dev_eui: DevEui::new(dev_eui),
+    dev_nonce: DevNonce::new(dev_nonce),
+  })
 }
 
 fn parse_data(_m_type: MType, _body: &[u8]) -> crate::Result<Data> {
@@ -377,5 +395,28 @@ mod tests {
   fn from_wire_rejects_too_short() {
     let err = LoraPacket::from_wire(&[1, 2, 3, 4]).unwrap_err();
     assert!(matches!(err, crate::Error::TooShort { .. }));
+  }
+
+  /// Mirror of `__tests__/parse_test.ts`: "parses a Join Request"
+  #[test]
+  fn parse_join_request_known_vector() {
+    let bytes = hex_to_vec("0039363463336913aa05693574323831338ef1c1d5ec6c");
+    let p = LoraPacket::from_wire(&bytes).unwrap();
+    assert_eq!(p.mhdr.as_byte(), 0x00);
+    assert_eq!(p.mic, [0xc1, 0xd5, 0xec, 0x6c]);
+    let jr = p.as_join_request().expect("expected JoinRequest");
+    assert_eq!(
+      jr.join_eui.as_bytes(),
+      &[0xaa, 0x13, 0x69, 0x33, 0x63, 0x34, 0x36, 0x39]
+    );
+    assert_eq!(jr.dev_eui.as_bytes(), &[0x33, 0x31, 0x38, 0x32, 0x74, 0x35, 0x69, 0x05]);
+    assert_eq!(jr.dev_nonce.as_bytes(), &[0xf1, 0x8e]);
+  }
+
+  fn hex_to_vec(s: &str) -> Vec<u8> {
+    (0..s.len())
+      .step_by(2)
+      .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex"))
+      .collect()
   }
 }
