@@ -16,4 +16,7 @@ pub mod types;
 mod util;
 
 pub use error::{Error, Result};
-pub use types::{Direction, DlSettings, FCtrl, LorawanVersion, MType, Mhdr};
+pub use types::{
+  AppEui, AppNonce, DevAddr, DevEui, DevNonce, Direction, DlSettings, FCtrl, JoinEui, JoinNonce,
+  LorawanVersion, MType, Mhdr, NetId,
+};

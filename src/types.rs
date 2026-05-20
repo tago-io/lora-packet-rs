@@ -191,6 +191,71 @@ impl DlSettings {
   }
 }
 
+/// Internal macro: declare a Copy newtype wrapping a fixed-size byte array.
+macro_rules! id_newtype {
+  ($(#[$meta:meta])* $name:ident, $len:expr) => {
+    $(#[$meta])*
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct $name(pub [u8; $len]);
+
+    impl $name {
+      /// Construct from a fixed-size array.
+      pub const fn new(bytes: [u8; $len]) -> Self {
+        Self(bytes)
+      }
+
+      /// Construct from a slice, validating the length.
+      ///
+      /// # Errors
+      /// Returns [`Error::InvalidIdentifierLength`] when the slice length
+      /// does not match the expected size.
+      pub fn from_slice(s: &[u8]) -> Result<Self> {
+        if s.len() != $len {
+          return Err(Error::InvalidIdentifierLength { expected: $len, got: s.len() });
+        }
+        let mut arr = [0u8; $len];
+        arr.copy_from_slice(s);
+        Ok(Self(arr))
+      }
+
+      /// Borrow the underlying bytes.
+      pub const fn as_bytes(&self) -> &[u8; $len] {
+        &self.0
+      }
+    }
+  };
+}
+
+id_newtype!(
+  /// Device address (4 bytes, big-endian display order).
+  DevAddr, 4
+);
+id_newtype!(
+  /// Device EUI (8 bytes, big-endian display order).
+  DevEui, 8
+);
+id_newtype!(
+  /// Application EUI / Join EUI (8 bytes, big-endian display order).
+  AppEui, 8
+);
+/// `LoRaWAN` 1.1 spec alias for `AppEui`.
+pub use AppEui as JoinEui;
+
+id_newtype!(
+  /// Network ID (3 bytes).
+  NetId, 3
+);
+id_newtype!(
+  /// Device nonce (2 bytes).
+  DevNonce, 2
+);
+id_newtype!(
+  /// Application nonce / Join nonce (3 bytes).
+  AppNonce, 3
+);
+/// `LoRaWAN` 1.1 spec alias for `AppNonce`.
+pub use AppNonce as JoinNonce;
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -244,5 +309,42 @@ mod tests {
     assert!(d.opt_neg());
     assert_eq!(d.rx1_dr_offset(), 0b011);
     assert_eq!(d.rx2_data_rate(), 0b0010);
+  }
+
+  #[test]
+  fn dev_addr_from_slice_ok() {
+    let a = DevAddr::from_slice(&[0x49, 0xBE, 0x7D, 0xF1]).unwrap();
+    assert_eq!(a.as_bytes(), &[0x49, 0xBE, 0x7D, 0xF1]);
+  }
+
+  #[test]
+  fn dev_addr_from_slice_wrong_length() {
+    let e = DevAddr::from_slice(&[0x49, 0xBE, 0x7D]).unwrap_err();
+    match e {
+      Error::InvalidIdentifierLength { expected, got } => {
+        assert_eq!(expected, 4);
+        assert_eq!(got, 3);
+      }
+      _ => panic!("wrong error variant"),
+    }
+  }
+
+  #[test]
+  fn dev_eui_round_trip() {
+    let bytes = [0x33, 0x31, 0x38, 0x32, 0x74, 0x35, 0x69, 0x05];
+    let e = DevEui::new(bytes);
+    assert_eq!(e.as_bytes(), &bytes);
+  }
+
+  #[test]
+  fn join_eui_is_app_eui_alias() {
+    let a: AppEui = JoinEui::new([1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq!(a.as_bytes(), &[1, 2, 3, 4, 5, 6, 7, 8]);
+  }
+
+  #[test]
+  fn dev_nonce_two_bytes() {
+    let n = DevNonce::from_slice(&[0xF1, 0x8E]).unwrap();
+    assert_eq!(n.as_bytes(), &[0xF1, 0x8E]);
   }
 }
