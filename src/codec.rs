@@ -157,27 +157,59 @@ impl LoraPacket {
 
   /// Borrow as `Data` if this is a data message.
   pub const fn as_data(&self) -> Option<&Data> {
-    if let Payload::Data(d) = &self.payload { Some(d) } else { None }
+    if let Payload::Data(d) = &self.payload {
+      Some(d)
+    } else {
+      None
+    }
   }
 
   /// Mutably borrow as `Data` if this is a data message.
   pub const fn as_data_mut(&mut self) -> Option<&mut Data> {
-    if let Payload::Data(d) = &mut self.payload { Some(d) } else { None }
+    if let Payload::Data(d) = &mut self.payload {
+      Some(d)
+    } else {
+      None
+    }
   }
 
   /// Borrow as `JoinRequest` if applicable.
   pub const fn as_join_request(&self) -> Option<&JoinRequest> {
-    if let Payload::JoinRequest(j) = &self.payload { Some(j) } else { None }
+    if let Payload::JoinRequest(j) = &self.payload {
+      Some(j)
+    } else {
+      None
+    }
   }
 
   /// Borrow as `JoinAccept` if applicable.
   pub const fn as_join_accept(&self) -> Option<&JoinAccept> {
-    if let Payload::JoinAccept(j) = &self.payload { Some(j) } else { None }
+    if let Payload::JoinAccept(j) = &self.payload {
+      Some(j)
+    } else {
+      None
+    }
   }
 
   /// Borrow as `RejoinRequest` if applicable.
   pub const fn as_rejoin_request(&self) -> Option<&RejoinRequest> {
-    if let Payload::RejoinRequest(r) = &self.payload { Some(r) } else { None }
+    if let Payload::RejoinRequest(r) = &self.payload {
+      Some(r)
+    } else {
+      None
+    }
+  }
+}
+
+impl Data {
+  /// Lower 16 bits of `FCnt` as read from the wire (little-endian).
+  pub const fn f_cnt(&self) -> u16 {
+    u16::from_le_bytes(self.f_cnt)
+  }
+
+  /// Full 32-bit `FCnt`, combining the wire LSB16 with a caller-tracked MSB16.
+  pub const fn f_cnt_32(&self, msb: u16) -> u32 {
+    ((msb as u32) << 16) | (self.f_cnt() as u32)
   }
 }
 
@@ -254,5 +286,22 @@ mod tests {
     assert!(p.is_join_request());
     assert!(p.as_join_request().is_some());
     assert!(p.as_data().is_none());
+  }
+
+  #[test]
+  fn data_f_cnt_little_endian() {
+    let d = Data {
+      direction: Direction::Uplink,
+      confirmed: false,
+      dev_addr: DevAddr::new([0u8; 4]),
+      f_ctrl: FCtrl(0),
+      f_cnt: [0x02, 0x00],
+      f_opts: alloc::vec![],
+      f_port: None,
+      frm_payload: None,
+    };
+    assert_eq!(d.f_cnt(), 2);
+    assert_eq!(d.f_cnt_32(0), 2);
+    assert_eq!(d.f_cnt_32(1), 0x0001_0002);
   }
 }
