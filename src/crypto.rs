@@ -4,7 +4,9 @@
 use aes::Aes128;
 use aes::cipher::{Array, BlockCipherEncrypt, KeyInit};
 
-use crate::types::{AppKey, AppNonce, AppSKey, DevNonce, NetId, NwkSKey};
+use crate::types::{
+  AppEui, AppKey, AppNonce, AppSKey, DevNonce, FNwkSIntKey, NetId, NwkKey, NwkSEncKey, NwkSKey, SNwkSIntKey,
+};
 
 /// Encrypt one 16-byte block under AES-128 ECB. The low-level primitive.
 pub fn aes_ecb_encrypt(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
@@ -57,6 +59,88 @@ fn derive_session_key_10(
   aes_ecb_encrypt(&block, app_key.as_bytes())
 }
 
+/// `LoRaWAN` 1.1 session keys derived during OTAA.
+#[derive(Debug, Clone)]
+pub struct SessionKeys11 {
+  /// Application session key (`FRMPayload` crypt with `FPort` > 0).
+  pub app_s_key: AppSKey,
+  /// Forwarding network session integrity key (uplink MIC, first 2 bytes).
+  pub f_nwk_s_int_key: FNwkSIntKey,
+  /// Serving network session integrity key (uplink + downlink MIC).
+  pub s_nwk_s_int_key: SNwkSIntKey,
+  /// Network session encryption key (`FOpts` and `FRMPayload` with `FPort` = 0).
+  pub nwk_s_enc_key: NwkSEncKey,
+}
+
+impl SessionKeys11 {
+  /// Derive all four 1.1 session keys.
+  #[allow(clippy::trivially_copy_pass_by_ref)]
+  pub fn derive(
+    app_key: &AppKey,
+    nwk_key: &NwkKey,
+    join_eui: &AppEui,
+    app_nonce: &AppNonce,
+    dev_nonce: &DevNonce,
+  ) -> Self {
+    let app_s_key = AppSKey::new(derive_session_key_11(
+      0x02,
+      app_key.as_bytes(),
+      join_eui,
+      app_nonce,
+      dev_nonce,
+    ));
+    let f_nwk_s_int_key = FNwkSIntKey::new(derive_session_key_11(
+      0x01,
+      nwk_key.as_bytes(),
+      join_eui,
+      app_nonce,
+      dev_nonce,
+    ));
+    let s_nwk_s_int_key = SNwkSIntKey::new(derive_session_key_11(
+      0x03,
+      nwk_key.as_bytes(),
+      join_eui,
+      app_nonce,
+      dev_nonce,
+    ));
+    let nwk_s_enc_key = NwkSEncKey::new(derive_session_key_11(
+      0x04,
+      nwk_key.as_bytes(),
+      join_eui,
+      app_nonce,
+      dev_nonce,
+    ));
+    Self {
+      app_s_key,
+      f_nwk_s_int_key,
+      s_nwk_s_int_key,
+      nwk_s_enc_key,
+    }
+  }
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn derive_session_key_11(
+  prefix: u8,
+  key: &[u8; 16],
+  join_eui: &AppEui,
+  app_nonce: &AppNonce,
+  dev_nonce: &DevNonce,
+) -> [u8; 16] {
+  let mut block = [0u8; 16];
+  block[0] = prefix;
+  let mut n = *app_nonce.as_bytes();
+  n.reverse();
+  block[1..4].copy_from_slice(&n);
+  let mut e = *join_eui.as_bytes();
+  e.reverse();
+  block[4..12].copy_from_slice(&e);
+  let mut dn = *dev_nonce.as_bytes();
+  dn.reverse();
+  block[12..14].copy_from_slice(&dn);
+  aes_ecb_encrypt(&block, key)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -90,5 +174,18 @@ mod tests {
     let keys2 = SessionKeys10::derive(&app_key, &net_id, &app_nonce, &dev_nonce);
     assert_eq!(keys.app_s_key.as_bytes(), keys2.app_s_key.as_bytes());
     assert_eq!(keys.nwk_s_key.as_bytes(), keys2.nwk_s_key.as_bytes());
+  }
+
+  #[test]
+  fn session_keys_11_distinct() {
+    let app_key = AppKey::new([0x11u8; 16]);
+    let nwk_key = NwkKey::new([0x22u8; 16]);
+    let join_eui = AppEui::new([0x33u8; 8]);
+    let app_nonce = AppNonce::new([0x44, 0x55, 0x66]);
+    let dev_nonce = DevNonce::new([0x77, 0x88]);
+    let k = SessionKeys11::derive(&app_key, &nwk_key, &join_eui, &app_nonce, &dev_nonce);
+    assert_ne!(k.app_s_key.as_bytes(), k.f_nwk_s_int_key.as_bytes());
+    assert_ne!(k.f_nwk_s_int_key.as_bytes(), k.s_nwk_s_int_key.as_bytes());
+    assert_ne!(k.s_nwk_s_int_key.as_bytes(), k.nwk_s_enc_key.as_bytes());
   }
 }
