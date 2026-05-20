@@ -205,6 +205,89 @@ impl WorKeys {
   }
 }
 
+impl crate::codec::Data {
+  /// Encrypt or decrypt `FRMPayload`. The XOR keystream construction makes
+  /// the same operation work in both directions.
+  ///
+  /// Selects `NwkSKey` when `FPort == 0`, `AppSKey` otherwise.
+  ///
+  /// # Errors
+  /// Currently infallible (returns `Result` for forward compatibility).
+  pub fn decrypt_payload(
+    &self,
+    app_s_key: &AppSKey,
+    nwk_s_key: &NwkSKey,
+    f_cnt_msb: u16,
+  ) -> crate::Result<alloc::vec::Vec<u8>> {
+    let cipher = self.frm_payload.as_deref().unwrap_or(&[]);
+    let key = if self.f_port == Some(0) {
+      nwk_s_key.as_bytes()
+    } else {
+      app_s_key.as_bytes()
+    };
+    Ok(payload_crypt(
+      cipher,
+      key,
+      self.direction,
+      self.dev_addr,
+      self.f_cnt_32(f_cnt_msb),
+    ))
+  }
+
+  /// Encrypt the given plaintext under the `FRMPayload` keystream.
+  ///
+  /// Selects `NwkSKey` when `FPort == 0`, `AppSKey` otherwise.
+  ///
+  /// # Errors
+  /// Currently infallible.
+  pub fn encrypt_payload(
+    &self,
+    plaintext: &[u8],
+    app_s_key: &AppSKey,
+    nwk_s_key: &NwkSKey,
+    f_cnt_msb: u16,
+  ) -> crate::Result<alloc::vec::Vec<u8>> {
+    let key = if self.f_port == Some(0) {
+      nwk_s_key.as_bytes()
+    } else {
+      app_s_key.as_bytes()
+    };
+    Ok(payload_crypt(
+      plaintext,
+      key,
+      self.direction,
+      self.dev_addr,
+      self.f_cnt_32(f_cnt_msb),
+    ))
+  }
+}
+
+fn payload_crypt(
+  input: &[u8],
+  key: &[u8; 16],
+  direction: crate::types::Direction,
+  dev_addr: DevAddr,
+  f_cnt_32: u32,
+) -> alloc::vec::Vec<u8> {
+  let dir_byte = u8::from(!matches!(direction, crate::types::Direction::Uplink));
+  let mut out = alloc::vec::Vec::with_capacity(input.len());
+  let mut addr = *dev_addr.as_bytes();
+  addr.reverse();
+  for (i_chunk, chunk) in input.chunks(16).enumerate() {
+    let mut ai = [0u8; 16];
+    ai[0] = 0x01;
+    ai[5] = dir_byte;
+    ai[6..10].copy_from_slice(&addr);
+    ai[10..14].copy_from_slice(&f_cnt_32.to_le_bytes());
+    ai[15] = u8::try_from(i_chunk + 1).unwrap_or(0xFF);
+    let s = aes_ecb_encrypt(&ai, key);
+    for (j, b) in chunk.iter().enumerate() {
+      out.push(b ^ s[j]);
+    }
+  }
+  out
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -276,5 +359,52 @@ mod tests {
     let dev = DevAddr::new([0x01, 0x02, 0x03, 0x04]);
     let s = WorKeys::session(&root, &dev);
     assert_ne!(s.wor_s_int_key.as_bytes(), s.wor_s_enc_key.as_bytes());
+  }
+
+  use crate::codec::LoraPacket;
+  use alloc::vec::Vec;
+
+  fn hex_to_vec(s: &str) -> Vec<u8> {
+    (0..s.len())
+      .step_by(2)
+      .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex"))
+      .collect()
+  }
+
+  fn hex_to_arr_16(s: &str) -> [u8; 16] {
+    let mut arr = [0u8; 16];
+    for (i, byte) in (0..s.len()).step_by(2).enumerate() {
+      arr[i] = u8::from_str_radix(&s[byte..byte + 2], 16).unwrap();
+    }
+    arr
+  }
+
+  /// Mirror of `__tests__/decrypt_test.ts`: "should decrypt test payload".
+  #[test]
+  fn decrypt_payload_test_text() {
+    let bytes = hex_to_vec("40f17dbe4900020001954378762b11ff0d");
+    let packet = LoraPacket::from_wire(&bytes).unwrap();
+    let data = packet.as_data().unwrap();
+    let app_s_key = AppSKey::new(hex_to_arr_16("ec925802ae430ca77fd3dd73cb2cc588"));
+    let nwk_s_key = NwkSKey::new([0u8; 16]);
+    let plain = data.decrypt_payload(&app_s_key, &nwk_s_key, 0).unwrap();
+    assert_eq!(plain, b"test");
+  }
+
+  /// Round-trip: encrypt -> decrypt produces original.
+  #[test]
+  fn encrypt_then_decrypt_round_trip() {
+    let bytes = hex_to_vec("40f17dbe4900020001954378762b11ff0d");
+    let packet = LoraPacket::from_wire(&bytes).unwrap();
+    let data = packet.as_data().unwrap();
+    let app_s_key = AppSKey::new(hex_to_arr_16("ec925802ae430ca77fd3dd73cb2cc588"));
+    let nwk_s_key = NwkSKey::new([0u8; 16]);
+    let plain = b"hello world!";
+    let ct = data.encrypt_payload(plain, &app_s_key, &nwk_s_key, 0).unwrap();
+    assert_ne!(ct, plain);
+    let mut clone = data.clone();
+    clone.frm_payload = Some(ct);
+    let decrypted = clone.decrypt_payload(&app_s_key, &nwk_s_key, 0).unwrap();
+    assert_eq!(decrypted, plain);
   }
 }
