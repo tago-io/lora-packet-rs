@@ -164,6 +164,40 @@ pub(crate) fn calculate_data_mic_1_1_uplink(
   [cmac_s[0], cmac_s[1], cmac_f[0], cmac_f[1]]
 }
 
+/// Compute the Data MIC for `LoRaWAN` 1.1 downlink.
+///
+/// B0-style block with bytes 1..5 = `ConfFCntDown`||TxDr||TxCh (or all zero
+/// when absent). Key: `SNwkSIntKey`.
+#[allow(dead_code)] // wired up in Task 8.8 dispatcher
+pub(crate) fn calculate_data_mic_1_1_downlink(
+  packet: &crate::codec::LoraPacket,
+  s_nwk_s_int_key: &[u8; 16],
+  f_cnt_msb: u16,
+  conf_fcnt_down_tx_dr_tx_ch: [u8; 4],
+) -> [u8; 4] {
+  let crate::codec::Payload::Data(data) = &packet.payload else {
+    unreachable!("calculate_data_mic_1_1_downlink called on non-data packet");
+  };
+
+  let mhdr_and_body = &packet.phy_payload[..packet.phy_payload.len() - 4];
+  let dir_byte = 1u8;
+  let f_cnt_32 = data.f_cnt_32(f_cnt_msb);
+  let mut addr = *data.dev_addr.as_bytes();
+  addr.reverse();
+
+  let mut input = alloc::vec::Vec::with_capacity(16 + mhdr_and_body.len());
+  input.push(0x49);
+  input.extend_from_slice(&conf_fcnt_down_tx_dr_tx_ch);
+  input.push(dir_byte);
+  input.extend_from_slice(&addr);
+  input.extend_from_slice(&f_cnt_32.to_le_bytes());
+  input.push(0x00);
+  input.push(u8::try_from(mhdr_and_body.len()).unwrap_or(0xFF));
+  input.extend_from_slice(mhdr_and_body);
+
+  cmac4(s_nwk_s_int_key, &input)
+}
+
 /// Compute the Join Accept MIC for `LoRaWAN` 1.1 with `OptNeg` set.
 ///
 /// CMAC input is `JoinReqType(1) || JoinEUI_LE(8) || DevNonce_LE(2) ||
@@ -258,6 +292,17 @@ mod tests {
     let nwk_s_key = NwkSKey::new(hex_to_arr_16("44024241ed4ce9a68c6a8bc055233fd3"));
     let mic = calculate_data_mic_1_0(&packet, nwk_s_key.as_bytes(), 0);
     assert_eq!(mic, [0xf9, 0xd6, 0x5d, 0x27]);
+  }
+
+  #[test]
+  fn data_mic_1_1_downlink_deterministic() {
+    use crate::codec::LoraPacket;
+    let bytes = hex_to_vec("60f17dbe4920020001f9d65d27");
+    let packet = LoraPacket::from_wire(&bytes).unwrap();
+    let s_key = SNwkSIntKey::new([0x33u8; 16]);
+    let m1 = calculate_data_mic_1_1_downlink(&packet, s_key.as_bytes(), 0, [0; 4]);
+    let m2 = calculate_data_mic_1_1_downlink(&packet, s_key.as_bytes(), 0, [0; 4]);
+    assert_eq!(m1, m2);
   }
 
   #[test]
