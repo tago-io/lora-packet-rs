@@ -5,8 +5,8 @@ use aes::Aes128;
 use aes::cipher::{Array, BlockCipherEncrypt, KeyInit};
 
 use crate::types::{
-  AppEui, AppKey, AppNonce, AppSKey, DevEui, DevNonce, FNwkSIntKey, JSEncKey, JSIntKey, NetId, NwkKey, NwkSEncKey,
-  NwkSKey, SNwkSIntKey,
+  AppEui, AppKey, AppNonce, AppSKey, DevAddr, DevEui, DevNonce, FNwkSIntKey, JSEncKey, JSIntKey, NetId, NwkKey,
+  NwkSEncKey, NwkSKey, RootWorSKey, SNwkSIntKey, WorSEncKey, WorSIntKey,
 };
 
 /// Encrypt one 16-byte block under AES-128 ECB. The low-level primitive.
@@ -167,6 +167,44 @@ impl JoinServerKeys {
   }
 }
 
+/// Relay (WOR) session keys derived from `RootWorSKey` and `DevAddr`.
+#[derive(Debug, Clone)]
+pub struct WorSessionKeys {
+  /// WOR session integrity key.
+  pub wor_s_int_key: WorSIntKey,
+  /// WOR session encryption key.
+  pub wor_s_enc_key: WorSEncKey,
+}
+
+/// Namespace for Relay/WOR key derivation.
+pub struct WorKeys;
+
+impl WorKeys {
+  /// Derive `RootWorSKey` from `NwkSKey`.
+  pub fn root(nwk_s_key: &NwkSKey) -> RootWorSKey {
+    let mut block = [0u8; 16];
+    block[0] = 0x01;
+    RootWorSKey::new(aes_ecb_encrypt(&block, nwk_s_key.as_bytes()))
+  }
+
+  /// Derive WOR session keys from a root key and `DevAddr`.
+  #[allow(clippy::trivially_copy_pass_by_ref)]
+  pub fn session(root: &RootWorSKey, dev_addr: &DevAddr) -> WorSessionKeys {
+    let mut block = [0u8; 16];
+    block[0] = 0x01;
+    let mut a = *dev_addr.as_bytes();
+    a.reverse();
+    block[1..5].copy_from_slice(&a);
+    let wor_s_int_key = WorSIntKey::new(aes_ecb_encrypt(&block, root.as_bytes()));
+    block[0] = 0x02;
+    let wor_s_enc_key = WorSEncKey::new(aes_ecb_encrypt(&block, root.as_bytes()));
+    WorSessionKeys {
+      wor_s_int_key,
+      wor_s_enc_key,
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -221,5 +259,22 @@ mod tests {
     let dev_eui = DevEui::new([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
     let k = JoinServerKeys::derive(&nwk_key, &dev_eui);
     assert_ne!(k.js_int_key.as_bytes(), k.js_enc_key.as_bytes());
+  }
+
+  #[test]
+  fn wor_root_key_deterministic() {
+    let nwk = NwkSKey::new([0x00u8; 16]);
+    let r1 = WorKeys::root(&nwk);
+    let r2 = WorKeys::root(&nwk);
+    assert_eq!(r1.as_bytes(), r2.as_bytes());
+  }
+
+  #[test]
+  fn wor_session_keys_distinct() {
+    let nwk = NwkSKey::new([0x33u8; 16]);
+    let root = WorKeys::root(&nwk);
+    let dev = DevAddr::new([0x01, 0x02, 0x03, 0x04]);
+    let s = WorKeys::session(&root, &dev);
+    assert_ne!(s.wor_s_int_key.as_bytes(), s.wor_s_enc_key.as_bytes());
   }
 }
