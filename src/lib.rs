@@ -12,5 +12,6 @@
 extern crate alloc;
 
 pub mod error;
+mod util;
 
 pub use error::{Error, Result};
