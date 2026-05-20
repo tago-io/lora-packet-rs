@@ -57,9 +57,21 @@ pub(crate) fn mic_eq(a: [u8; 4], b: [u8; 4]) -> bool {
   a.ct_eq(&b).into()
 }
 
+/// Compute the Join Request MIC.
+///
+/// Same algorithm for `LoRaWAN` 1.0 and 1.1; only the key differs (`AppKey`
+/// for 1.0, `NwkKey` for 1.1). The CMAC input is `MHDR || JoinRequestBody`
+/// (everything in `phy_payload` except the 4-byte MIC).
+#[allow(dead_code)] // wired up in Task 8.8 dispatcher
+pub(crate) fn calculate_join_request_mic(packet: &crate::codec::LoraPacket, key: &[u8; 16]) -> [u8; 4] {
+  let bytes = &packet.phy_payload[..packet.phy_payload.len() - 4];
+  cmac4(key, bytes)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+  use alloc::vec::Vec;
 
   #[test]
   fn cmac4_deterministic() {
@@ -73,5 +85,31 @@ mod tests {
   fn mic_eq_works() {
     assert!(mic_eq([1, 2, 3, 4], [1, 2, 3, 4]));
     assert!(!mic_eq([1, 2, 3, 4], [1, 2, 3, 5]));
+  }
+
+  /// Mirror of __tests__/mic_test.ts: "should calculate & verify correct join request packet MIC in 1.1"
+  #[test]
+  fn join_request_mic_1_1_vector() {
+    use crate::codec::LoraPacket;
+    let bytes = hex_to_vec("00010000000000000001000000000000000ce83685eb17");
+    let packet = LoraPacket::from_wire(&bytes).unwrap();
+    let nwk_key = NwkKey::new(hex_to_arr_16("01010101010101010101010101010101"));
+    let mic = calculate_join_request_mic(&packet, nwk_key.as_bytes());
+    assert_eq!(mic, [0x36, 0x85, 0xeb, 0x17]);
+  }
+
+  fn hex_to_vec(s: &str) -> Vec<u8> {
+    (0..s.len())
+      .step_by(2)
+      .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+      .collect()
+  }
+
+  fn hex_to_arr_16(s: &str) -> [u8; 16] {
+    let mut arr = [0u8; 16];
+    for (i, byte) in (0..s.len()).step_by(2).enumerate() {
+      arr[i] = u8::from_str_radix(&s[byte..byte + 2], 16).unwrap();
+    }
+    arr
   }
 }
