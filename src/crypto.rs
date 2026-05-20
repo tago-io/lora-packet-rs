@@ -2,7 +2,7 @@
 //! session/JS/WOR key derivation.
 
 use aes::Aes128;
-use aes::cipher::{Array, BlockCipherEncrypt, KeyInit};
+use aes::cipher::{Array, BlockCipherDecrypt, BlockCipherEncrypt, KeyInit};
 
 use crate::types::{
   AppEui, AppKey, AppNonce, AppSKey, DevAddr, DevEui, DevNonce, FNwkSIntKey, JSEncKey, JSIntKey, NetId, NwkKey,
@@ -14,6 +14,14 @@ pub fn aes_ecb_encrypt(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
   let cipher = Aes128::new(&Array::from(*key));
   let mut buf = Array::from(*block);
   cipher.encrypt_block(&mut buf);
+  buf.into()
+}
+
+/// Decrypt one 16-byte block under AES-128 ECB. The low-level primitive.
+pub fn aes_ecb_decrypt(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
+  let cipher = Aes128::new(&Array::from(*key));
+  let mut buf = Array::from(*block);
+  cipher.decrypt_block(&mut buf);
   buf.into()
 }
 
@@ -333,6 +341,50 @@ impl crate::codec::Data {
   }
 }
 
+impl crate::codec::JoinAccept {
+  /// Decrypt a wire-format Join Accept (`MHDR` + ciphertext body + MIC).
+  ///
+  /// On-air the device applies AES-ECB-encrypt to undo the server's
+  /// AES-ECB-decrypt; the MHDR passes through unchanged. The total length
+  /// must be 17 (one block) or 33 (two blocks).
+  ///
+  /// # Errors
+  /// `Error::TooShort` when the total length is outside {17, 33}.
+  pub fn decrypt_from_wire(ciphertext: &[u8], app_key: &AppKey) -> crate::Result<alloc::vec::Vec<u8>> {
+    join_accept_transform(ciphertext, app_key, aes_ecb_encrypt)
+  }
+
+  /// Encrypt a plaintext Join Accept (server-side AES-ECB-decrypt of the
+  /// body); the MHDR is left as-is.
+  ///
+  /// # Errors
+  /// `Error::TooShort` when the total length is outside {17, 33}.
+  pub fn encrypt_for_wire(plaintext: &[u8], app_key: &AppKey) -> crate::Result<alloc::vec::Vec<u8>> {
+    join_accept_transform(plaintext, app_key, aes_ecb_decrypt)
+  }
+}
+
+fn join_accept_transform(
+  input: &[u8],
+  app_key: &AppKey,
+  op: fn(&[u8; 16], &[u8; 16]) -> [u8; 16],
+) -> crate::Result<alloc::vec::Vec<u8>> {
+  if input.len() != 17 && input.len() != 33 {
+    return Err(crate::Error::TooShort {
+      expected: 17,
+      got: input.len(),
+    });
+  }
+  let mut out = alloc::vec::Vec::with_capacity(input.len());
+  out.push(input[0]);
+  for chunk in input[1..].chunks(16) {
+    let mut block = [0u8; 16];
+    block.copy_from_slice(chunk);
+    out.extend_from_slice(&op(&block, app_key.as_bytes()));
+  }
+  Ok(out)
+}
+
 fn fopts_crypt(
   input: &[u8],
   key: &[u8; 16],
@@ -505,5 +557,27 @@ mod tests {
     clone.f_opts = encrypted;
     let decrypted = clone.decrypt_fopts(&nwk_s_enc_key, 0).unwrap();
     assert_eq!(decrypted, [0x02, 0x07, 0x01]);
+  }
+
+  /// Mirror of `__tests__/join_accept_encrypt.ts`: "should create join
+  /// accept packet with zero value" (server-side encrypt produces wire form).
+  #[test]
+  fn join_accept_encrypt_zero_app_key() {
+    let app_key = AppKey::new([0u8; 16]);
+    let plaintext = hex_to_vec("20000000000000000000000000f86f0a91");
+    let encrypted = crate::codec::JoinAccept::encrypt_for_wire(&plaintext, &app_key).unwrap();
+    let expected = hex_to_vec("20e3de108795f776b8037610ef7869b5b3");
+    assert_eq!(encrypted, expected);
+  }
+
+  /// `encrypt_for_wire` and `decrypt_from_wire` are inverses (the on-air
+  /// AES-ECB trick).
+  #[test]
+  fn join_accept_decrypt_round_trip() {
+    let app_key = AppKey::new([0u8; 16]);
+    let plaintext = hex_to_vec("20000000000000000000000000f86f0a91");
+    let encrypted = crate::codec::JoinAccept::encrypt_for_wire(&plaintext, &app_key).unwrap();
+    let decrypted = crate::codec::JoinAccept::decrypt_from_wire(&encrypted, &app_key).unwrap();
+    assert_eq!(decrypted, plaintext);
   }
 }
