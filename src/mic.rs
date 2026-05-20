@@ -68,6 +68,15 @@ pub(crate) fn calculate_join_request_mic(packet: &crate::codec::LoraPacket, key:
   cmac4(key, bytes)
 }
 
+/// Compute the Join Accept MIC for `LoRaWAN` 1.0.
+///
+/// CMAC input is the plaintext `MHDR || JoinAcceptBody` (the Join Accept body
+/// is encrypted on the wire; pass the decrypted bytes). The key is `AppKey`.
+#[allow(dead_code)] // wired up in Task 8.8 dispatcher
+pub(crate) fn calculate_join_accept_mic_1_0(mhdr_and_body: &[u8], key: &[u8; 16]) -> [u8; 4] {
+  cmac4(key, mhdr_and_body)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -96,6 +105,18 @@ mod tests {
     let nwk_key = NwkKey::new(hex_to_arr_16("01010101010101010101010101010101"));
     let mic = calculate_join_request_mic(&packet, nwk_key.as_bytes());
     assert_eq!(mic, [0x36, 0x85, 0xeb, 0x17]);
+  }
+
+  #[test]
+  fn join_accept_mic_1_0_deterministic() {
+    // MHDR (Join Accept = 0x20) + 12-byte zero body.
+    let raw = [0x20u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let app_key = AppKey::new([0u8; 16]);
+    let m1 = calculate_join_accept_mic_1_0(&raw, app_key.as_bytes());
+    let m2 = calculate_join_accept_mic_1_0(&raw, app_key.as_bytes());
+    assert_eq!(m1, m2);
+    // Cross-check against the same construction with all-zero inputs.
+    assert_eq!(m1, [0xf8, 0x6f, 0x0a, 0x91]);
   }
 
   fn hex_to_vec(s: &str) -> Vec<u8> {
