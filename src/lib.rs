@@ -10,3 +10,7 @@
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 
 extern crate alloc;
+
+pub mod error;
+
+pub use error::{Error, Result};
