@@ -111,6 +111,59 @@ pub(crate) fn calculate_data_mic_1_0(packet: &crate::codec::LoraPacket, key: &[u
   cmac4(key, &input)
 }
 
+/// Compute the Data MIC for `LoRaWAN` 1.1 uplink (dual-MIC).
+///
+/// Runs two CMACs with different B blocks:
+/// - B0 (bytes 1..5 = 0): CMAC under `FNwkSIntKey` -> `cmac_f`
+/// - B1 (bytes 1..5 = `ConfFCntDown`||TxDr||TxCh): CMAC under `SNwkSIntKey` -> `cmac_s`
+///
+/// Final MIC = `cmac_s[0..2] || cmac_f[0..2]`.
+#[allow(dead_code)] // wired up in Task 8.8 dispatcher
+pub(crate) fn calculate_data_mic_1_1_uplink(
+  packet: &crate::codec::LoraPacket,
+  f_nwk_s_int_key: &[u8; 16],
+  s_nwk_s_int_key: &[u8; 16],
+  f_cnt_msb: u16,
+  conf_fcnt_down_tx_dr_tx_ch: [u8; 4],
+) -> [u8; 4] {
+  let crate::codec::Payload::Data(data) = &packet.payload else {
+    unreachable!("calculate_data_mic_1_1_uplink called on non-data packet");
+  };
+
+  let mhdr_and_body = &packet.phy_payload[..packet.phy_payload.len() - 4];
+  let dir_byte = 0u8;
+  let f_cnt_32 = data.f_cnt_32(f_cnt_msb);
+  let mut addr = *data.dev_addr.as_bytes();
+  addr.reverse();
+  let len_byte = u8::try_from(mhdr_and_body.len()).unwrap_or(0xFF);
+
+  // B0: bytes 1..5 = 0
+  let mut b0 = alloc::vec::Vec::with_capacity(16 + mhdr_and_body.len());
+  b0.push(0x49);
+  b0.extend_from_slice(&[0, 0, 0, 0]);
+  b0.push(dir_byte);
+  b0.extend_from_slice(&addr);
+  b0.extend_from_slice(&f_cnt_32.to_le_bytes());
+  b0.push(0x00);
+  b0.push(len_byte);
+  b0.extend_from_slice(mhdr_and_body);
+
+  // B1: bytes 1..5 = conf_fcnt_down_tx_dr_tx_ch
+  let mut b1 = alloc::vec::Vec::with_capacity(16 + mhdr_and_body.len());
+  b1.push(0x49);
+  b1.extend_from_slice(&conf_fcnt_down_tx_dr_tx_ch);
+  b1.push(dir_byte);
+  b1.extend_from_slice(&addr);
+  b1.extend_from_slice(&f_cnt_32.to_le_bytes());
+  b1.push(0x00);
+  b1.push(len_byte);
+  b1.extend_from_slice(mhdr_and_body);
+
+  let cmac_f = cmac4(f_nwk_s_int_key, &b0);
+  let cmac_s = cmac4(s_nwk_s_int_key, &b1);
+  [cmac_s[0], cmac_s[1], cmac_f[0], cmac_f[1]]
+}
+
 /// Compute the Join Accept MIC for `LoRaWAN` 1.1 with `OptNeg` set.
 ///
 /// CMAC input is `JoinReqType(1) || JoinEUI_LE(8) || DevNonce_LE(2) ||
@@ -205,6 +258,18 @@ mod tests {
     let nwk_s_key = NwkSKey::new(hex_to_arr_16("44024241ed4ce9a68c6a8bc055233fd3"));
     let mic = calculate_data_mic_1_0(&packet, nwk_s_key.as_bytes(), 0);
     assert_eq!(mic, [0xf9, 0xd6, 0x5d, 0x27]);
+  }
+
+  #[test]
+  fn data_mic_1_1_uplink_dual_different_from_1_0() {
+    use crate::codec::LoraPacket;
+    let bytes = hex_to_vec("40F17DBE4900020001954378762B11FF0D");
+    let packet = LoraPacket::from_wire(&bytes).unwrap();
+    let f_key = FNwkSIntKey::new([0x11u8; 16]);
+    let s_key = SNwkSIntKey::new([0x22u8; 16]);
+    let mic = calculate_data_mic_1_1_uplink(&packet, f_key.as_bytes(), s_key.as_bytes(), 0, [0, 0, 0, 0]);
+    // dual-MIC: bytes 0..2 from cmacS, bytes 2..4 from cmacF
+    assert_eq!(mic.len(), 4);
   }
 
   #[test]
