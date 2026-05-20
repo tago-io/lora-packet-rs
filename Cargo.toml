@@ -1,0 +1,36 @@
+[package]
+name = "lora-packet"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "LoRaWAN 1.0/1.1 packet decoder and encoder with parse, build, MIC, and key derivation."
+repository = "https://github.com/tago-io/lora-packet-rs"
+license = "MIT"
+keywords = ["lora", "lorawan", "packet", "codec", "iot"]
+categories = ["encoding", "embedded", "no-std", "parser-implementations"]
+
+[features]
+default = ["std"]
+std = ["thiserror/std"]
+serde = ["dep:serde"]
+hex_base64 = ["dep:hex", "dep:base64"]
+
+[dependencies]
+aes = { version = "0.9", default-features = false }
+cmac = { version = "0.8", default-features = false }
+cipher = "0.5"
+subtle = { version = "2.6", default-features = false }
+zeroize = { version = "1.8", default-features = false, features = ["derive"] }
+thiserror = { version = "2.0", default-features = false }
+hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
+base64 = { version = "0.22", default-features = false, features = ["alloc"], optional = true }
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"], optional = true }
+
+[dev-dependencies]
+hex = { version = "0.4", features = ["alloc"] }
+proptest = "1"
+serde_json = "1"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
