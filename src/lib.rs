@@ -14,12 +14,14 @@ extern crate alloc;
 pub mod codec;
 pub mod crypto;
 pub mod error;
+pub mod mic;
 pub mod types;
 mod util;
 
 pub use codec::{Data, JoinAccept, JoinRequest, LoraPacket, LoraPacketBuilder, Payload, RejoinRequest};
 pub use crypto::{JoinServerKeys, SessionKeys10, SessionKeys11, WorKeys, WorSessionKeys, aes_ecb_encrypt};
 pub use error::{Error, Result};
+pub use mic::{V1_0MicKeys, V1_1MicKeys};
 pub use types::{
   AppEui, AppKey, AppNonce, AppSKey, DevAddr, DevEui, DevNonce, Direction, DlSettings, FCtrl, FNwkSIntKey, JSEncKey,
   JSIntKey, JoinEui, JoinNonce, LorawanVersion, MType, Mhdr, NetId, NwkKey, NwkSEncKey, NwkSKey, RootWorSKey,
