@@ -682,4 +682,15 @@ mod tests {
     let err = LoraPacket::from_wire(&bytes).unwrap_err();
     assert!(matches!(err, crate::Error::InvalidRejoinType(3)));
   }
+
+  #[test]
+  fn parse_proprietary_keeps_body() {
+    let bytes = hex_to_vec("e0deadbeefcafe11223344");
+    let p = LoraPacket::from_wire(&bytes).unwrap();
+    match &p.payload {
+      Payload::Proprietary(body) => assert_eq!(body, &[0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe]),
+      _ => panic!("expected Proprietary"),
+    }
+    assert_eq!(p.mic, [0x11, 0x22, 0x33, 0x44]);
+  }
 }
