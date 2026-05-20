@@ -255,6 +255,110 @@ impl LoraPacket {
       payload,
     })
   }
+
+  /// Serialize back to wire bytes.
+  ///
+  /// Uses `self.mic` as-is. Call a MIC method first if you have keys.
+  pub fn to_wire(&self) -> Vec<u8> {
+    let mut out = Vec::with_capacity(self.phy_payload.len().max(13));
+    out.push(self.mhdr.as_byte());
+    match &self.payload {
+      Payload::JoinRequest(jr) => {
+        let mut tmp = *jr.join_eui.as_bytes();
+        tmp.reverse();
+        out.extend_from_slice(&tmp);
+        let mut tmp = *jr.dev_eui.as_bytes();
+        tmp.reverse();
+        out.extend_from_slice(&tmp);
+        let mut tmp = *jr.dev_nonce.as_bytes();
+        tmp.reverse();
+        out.extend_from_slice(&tmp);
+      }
+      Payload::Data(d) => {
+        let mut tmp = *d.dev_addr.as_bytes();
+        tmp.reverse();
+        out.extend_from_slice(&tmp);
+        out.push(d.f_ctrl.as_byte());
+        out.extend_from_slice(&d.f_cnt);
+        out.extend_from_slice(&d.f_opts);
+        if let Some(p) = d.f_port {
+          out.push(p);
+        }
+        if let Some(payload) = &d.frm_payload {
+          out.extend_from_slice(payload);
+        }
+      }
+      Payload::JoinAccept(ja) => {
+        let mut tmp = *ja.join_nonce.as_bytes();
+        tmp.reverse();
+        out.extend_from_slice(&tmp);
+        let mut tmp = *ja.net_id.as_bytes();
+        tmp.reverse();
+        out.extend_from_slice(&tmp);
+        let mut tmp = *ja.dev_addr.as_bytes();
+        tmp.reverse();
+        out.extend_from_slice(&tmp);
+        out.push(ja.dl_settings.as_byte());
+        out.push(ja.rx_delay);
+        if let Some(cf) = ja.cf_list {
+          out.extend_from_slice(&cf);
+        }
+      }
+      Payload::RejoinRequest(rj) => match rj {
+        RejoinRequest::Type0 {
+          net_id,
+          dev_eui,
+          rj_count_0,
+        } => {
+          out.push(0);
+          let mut tmp = *net_id.as_bytes();
+          tmp.reverse();
+          out.extend_from_slice(&tmp);
+          let mut tmp = *dev_eui.as_bytes();
+          tmp.reverse();
+          out.extend_from_slice(&tmp);
+          let mut tmp = *rj_count_0;
+          tmp.reverse();
+          out.extend_from_slice(&tmp);
+        }
+        RejoinRequest::Type1 {
+          join_eui,
+          dev_eui,
+          rj_count_1,
+        } => {
+          out.push(1);
+          let mut tmp = *join_eui.as_bytes();
+          tmp.reverse();
+          out.extend_from_slice(&tmp);
+          let mut tmp = *dev_eui.as_bytes();
+          tmp.reverse();
+          out.extend_from_slice(&tmp);
+          let mut tmp = *rj_count_1;
+          tmp.reverse();
+          out.extend_from_slice(&tmp);
+        }
+        RejoinRequest::Type2 {
+          net_id,
+          dev_eui,
+          rj_count_0,
+        } => {
+          out.push(2);
+          let mut tmp = *net_id.as_bytes();
+          tmp.reverse();
+          out.extend_from_slice(&tmp);
+          let mut tmp = *dev_eui.as_bytes();
+          tmp.reverse();
+          out.extend_from_slice(&tmp);
+          let mut tmp = *rj_count_0;
+          tmp.reverse();
+          out.extend_from_slice(&tmp);
+        }
+      },
+      Payload::Proprietary(b) => out.extend_from_slice(b),
+    }
+    out.extend_from_slice(&self.mic);
+    out
+  }
 }
 
 impl JoinAccept {
@@ -395,7 +499,6 @@ fn parse_data(m_type: MType, body: &[u8]) -> crate::Result<Data> {
 
 /// Builder for assembling a `LoraPacket` field-by-field.
 #[derive(Debug, Default, Clone)]
-#[allow(dead_code)]
 pub struct LoraPacketBuilder {
   m_type: Option<MType>,
   major: u8,
@@ -566,6 +669,109 @@ impl LoraPacketBuilder {
   pub const fn join_req_type(mut self, t: u8) -> Self {
     self.join_req_type = Some(t);
     self
+  }
+
+  /// Finalize the builder into a `LoraPacket` with MIC set to zero.
+  ///
+  /// Call a `sign_*` method on the builder, or call
+  /// `recalculate_mic_*` on the resulting `LoraPacket`, to fill in the MIC.
+  ///
+  /// # Errors
+  /// `Error::Other` when a required field for the chosen `MType` is missing.
+  /// `Error::InvalidRejoinType` when the rejoin type is not in {0, 1, 2}.
+  pub fn build_unsigned(self) -> crate::Result<LoraPacket> {
+    let m_type = self
+      .m_type
+      .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: m_type not set")))?;
+    let mhdr = Mhdr::from_parts(m_type, self.major);
+
+    let payload = match m_type {
+      MType::JoinRequest => Payload::JoinRequest(JoinRequest {
+        join_eui: self
+          .join_eui
+          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: join_eui not set")))?,
+        dev_eui: self
+          .dev_eui
+          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dev_eui not set")))?,
+        dev_nonce: self
+          .dev_nonce
+          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dev_nonce not set")))?,
+      }),
+      MType::JoinAccept => Payload::JoinAccept(JoinAccept {
+        join_nonce: self
+          .join_nonce
+          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: join_nonce not set")))?,
+        net_id: self
+          .net_id
+          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: net_id not set")))?,
+        dev_addr: self
+          .dev_addr
+          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dev_addr not set")))?,
+        dl_settings: self
+          .dl_settings
+          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dl_settings not set")))?,
+        rx_delay: self.rx_delay.unwrap_or(0),
+        cf_list: self.cf_list,
+        join_req_type: self.join_req_type,
+      }),
+      MType::UnconfirmedDataUp | MType::UnconfirmedDataDown | MType::ConfirmedDataUp | MType::ConfirmedDataDown => {
+        let direction = self
+          .direction
+          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: direction not set")))?;
+        let f_opts_len = u8::try_from(self.f_opts.len().min(15)).unwrap_or(15);
+        Payload::Data(Data {
+          direction,
+          confirmed: self.confirmed,
+          dev_addr: self
+            .dev_addr
+            .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dev_addr not set")))?,
+          f_ctrl: self.f_ctrl.unwrap_or(FCtrl(f_opts_len & 0x0f)),
+          f_cnt: self.f_cnt.unwrap_or(0).to_le_bytes(),
+          f_opts: self.f_opts,
+          f_port: self.f_port,
+          frm_payload: self.payload,
+        })
+      }
+      MType::RejoinRequest => {
+        let dev_eui = self
+          .dev_eui
+          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dev_eui not set")))?;
+        Payload::RejoinRequest(match self.rejoin_type.unwrap_or(0) {
+          0 => RejoinRequest::Type0 {
+            net_id: self
+              .net_id
+              .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: net_id not set")))?,
+            dev_eui,
+            rj_count_0: [0, 0],
+          },
+          1 => RejoinRequest::Type1 {
+            join_eui: self
+              .join_eui
+              .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: join_eui not set")))?,
+            dev_eui,
+            rj_count_1: [0, 0],
+          },
+          2 => RejoinRequest::Type2 {
+            net_id: self
+              .net_id
+              .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: net_id not set")))?,
+            dev_eui,
+            rj_count_0: [0, 0],
+          },
+          other => return Err(crate::Error::InvalidRejoinType(other)),
+        })
+      }
+      MType::Proprietary => Payload::Proprietary(self.payload.unwrap_or_default()),
+    };
+
+    let mut pkt = LoraPacket {
+      phy_payload: Vec::new(),
+      mhdr,
+      mic: [0u8; 4],
+      payload,
+    };
+    pkt.phy_payload = pkt.to_wire();
+    Ok(pkt)
   }
 }
 
@@ -887,5 +1093,27 @@ mod tests {
     assert_eq!(b.f_cnt.unwrap(), 7);
     assert_eq!(b.f_port.unwrap(), 1);
     assert_eq!(b.payload.as_deref().unwrap(), b"hi");
+  }
+
+  #[test]
+  fn build_unsigned_data_round_trip() {
+    let pkt = LoraPacket::builder()
+      .data(Direction::Uplink, false)
+      .dev_addr(DevAddr::new([0x49, 0xbe, 0x7d, 0xf1]))
+      .f_ctrl(FCtrl(0))
+      .f_cnt(2)
+      .f_port(1)
+      .payload(&[0x95, 0x43, 0x78, 0x76])
+      .build_unsigned()
+      .unwrap();
+
+    let wire = pkt.to_wire();
+    assert_eq!(&wire[..1], &[0x40]);
+    assert_eq!(&wire[1..5], &[0xf1, 0x7d, 0xbe, 0x49]);
+    assert_eq!(wire[5], 0x00);
+    assert_eq!(&wire[6..8], &[0x02, 0x00]);
+    assert_eq!(wire[8], 0x01);
+    assert_eq!(&wire[9..13], &[0x95, 0x43, 0x78, 0x76]);
+    assert_eq!(&wire[wire.len() - 4..], &[0, 0, 0, 0]);
   }
 }
