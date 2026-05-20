@@ -4,7 +4,7 @@
 
 use alloc::vec::Vec;
 
-use crate::types::{AppEui, AppNonce, DevAddr, DevEui, DevNonce, Direction, DlSettings, FCtrl, Mhdr, NetId};
+use crate::types::{AppEui, AppNonce, DevAddr, DevEui, DevNonce, Direction, DlSettings, FCtrl, MType, Mhdr, NetId};
 
 /// A `LoRaWAN` `PHYPayload`, parsed into structured fields.
 ///
@@ -121,10 +121,69 @@ pub enum RejoinRequest {
   },
 }
 
+impl LoraPacket {
+  /// Message type from the MHDR.
+  ///
+  /// # Panics
+  /// Never panics on a packet produced by `from_wire` (parser rejects invalid `MType`).
+  pub fn m_type(&self) -> MType {
+    self.mhdr.m_type().expect("LoraPacket MHDR always has a valid MType")
+  }
+
+  /// True for `ConfirmedData`/`UnconfirmedData` (up or down).
+  pub const fn is_data(&self) -> bool {
+    matches!(self.payload, Payload::Data(_))
+  }
+
+  /// True for `ConfirmedDataUp` or `ConfirmedDataDown`.
+  pub fn is_confirmed(&self) -> bool {
+    matches!(self.m_type(), MType::ConfirmedDataUp | MType::ConfirmedDataDown)
+  }
+
+  /// True for Join Request.
+  pub const fn is_join_request(&self) -> bool {
+    matches!(self.payload, Payload::JoinRequest(_))
+  }
+
+  /// True for Join Accept.
+  pub const fn is_join_accept(&self) -> bool {
+    matches!(self.payload, Payload::JoinAccept(_))
+  }
+
+  /// True for Rejoin Request.
+  pub const fn is_rejoin_request(&self) -> bool {
+    matches!(self.payload, Payload::RejoinRequest(_))
+  }
+
+  /// Borrow as `Data` if this is a data message.
+  pub const fn as_data(&self) -> Option<&Data> {
+    if let Payload::Data(d) = &self.payload { Some(d) } else { None }
+  }
+
+  /// Mutably borrow as `Data` if this is a data message.
+  pub const fn as_data_mut(&mut self) -> Option<&mut Data> {
+    if let Payload::Data(d) = &mut self.payload { Some(d) } else { None }
+  }
+
+  /// Borrow as `JoinRequest` if applicable.
+  pub const fn as_join_request(&self) -> Option<&JoinRequest> {
+    if let Payload::JoinRequest(j) = &self.payload { Some(j) } else { None }
+  }
+
+  /// Borrow as `JoinAccept` if applicable.
+  pub const fn as_join_accept(&self) -> Option<&JoinAccept> {
+    if let Payload::JoinAccept(j) = &self.payload { Some(j) } else { None }
+  }
+
+  /// Borrow as `RejoinRequest` if applicable.
+  pub const fn as_rejoin_request(&self) -> Option<&RejoinRequest> {
+    if let Payload::RejoinRequest(r) = &self.payload { Some(r) } else { None }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::types::MType;
 
   #[test]
   fn lora_packet_constructs_with_join_request_payload() {
@@ -139,5 +198,61 @@ mod tests {
       }),
     };
     assert!(matches!(p.payload, Payload::JoinRequest(_)));
+  }
+
+  fn sample_data_packet(confirmed: bool, direction: Direction) -> LoraPacket {
+    let m_type = match (confirmed, direction) {
+      (false, Direction::Uplink) => MType::UnconfirmedDataUp,
+      (false, Direction::Downlink) => MType::UnconfirmedDataDown,
+      (true, Direction::Uplink) => MType::ConfirmedDataUp,
+      (true, Direction::Downlink) => MType::ConfirmedDataDown,
+    };
+    LoraPacket {
+      phy_payload: alloc::vec![],
+      mhdr: Mhdr::from_parts(m_type, 0),
+      mic: [0u8; 4],
+      payload: Payload::Data(Data {
+        direction,
+        confirmed,
+        dev_addr: DevAddr::new([0u8; 4]),
+        f_ctrl: FCtrl(0),
+        f_cnt: [0, 0],
+        f_opts: alloc::vec![],
+        f_port: None,
+        frm_payload: None,
+      }),
+    }
+  }
+
+  #[test]
+  fn accessor_is_data() {
+    let p = sample_data_packet(false, Direction::Uplink);
+    assert!(p.is_data());
+    assert!(!p.is_confirmed());
+    assert!(p.as_data().is_some());
+  }
+
+  #[test]
+  fn accessor_is_confirmed() {
+    let p = sample_data_packet(true, Direction::Downlink);
+    assert!(p.is_data());
+    assert!(p.is_confirmed());
+  }
+
+  #[test]
+  fn accessor_is_join_request() {
+    let p = LoraPacket {
+      phy_payload: alloc::vec![],
+      mhdr: Mhdr::from_parts(MType::JoinRequest, 0),
+      mic: [0u8; 4],
+      payload: Payload::JoinRequest(JoinRequest {
+        join_eui: AppEui::new([0u8; 8]),
+        dev_eui: DevEui::new([0u8; 8]),
+        dev_nonce: DevNonce::new([0u8; 2]),
+      }),
+    };
+    assert!(p.is_join_request());
+    assert!(p.as_join_request().is_some());
+    assert!(p.as_data().is_none());
   }
 }
