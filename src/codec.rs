@@ -462,6 +462,111 @@ impl LoraPacketBuilder {
     self.rejoin_type = Some(rejoin_type);
     self
   }
+
+  /// Set `DevAddr` (Data and Join Accept).
+  #[must_use]
+  pub const fn dev_addr(mut self, addr: DevAddr) -> Self {
+    self.dev_addr = Some(addr);
+    self
+  }
+
+  /// Set `FCtrl` byte (Data).
+  #[must_use]
+  pub const fn f_ctrl(mut self, c: FCtrl) -> Self {
+    self.f_ctrl = Some(c);
+    self
+  }
+
+  /// Set `FCnt` (Data).
+  #[must_use]
+  pub const fn f_cnt(mut self, n: u16) -> Self {
+    self.f_cnt = Some(n);
+    self
+  }
+
+  /// Set `FOpts` MAC commands (Data).
+  #[must_use]
+  pub fn f_opts(mut self, opts: &[u8]) -> Self {
+    self.f_opts = opts.to_vec();
+    self
+  }
+
+  /// Set `FPort` (Data).
+  #[must_use]
+  pub const fn f_port(mut self, p: u8) -> Self {
+    self.f_port = Some(p);
+    self
+  }
+
+  /// Set `FRMPayload` plaintext (Data).
+  #[must_use]
+  pub fn payload(mut self, p: &[u8]) -> Self {
+    self.payload = Some(p.to_vec());
+    self
+  }
+
+  /// Set Join EUI (Join Request / Rejoin Type 1).
+  #[must_use]
+  pub const fn join_eui(mut self, e: AppEui) -> Self {
+    self.join_eui = Some(e);
+    self
+  }
+
+  /// Set Device EUI (Join Request / Rejoin).
+  #[must_use]
+  pub const fn dev_eui(mut self, e: DevEui) -> Self {
+    self.dev_eui = Some(e);
+    self
+  }
+
+  /// Set `DevNonce` (Join Request).
+  #[must_use]
+  pub const fn dev_nonce(mut self, n: DevNonce) -> Self {
+    self.dev_nonce = Some(n);
+    self
+  }
+
+  /// Set Join Nonce / `AppNonce` (Join Accept).
+  #[must_use]
+  pub const fn join_nonce(mut self, n: AppNonce) -> Self {
+    self.join_nonce = Some(n);
+    self
+  }
+
+  /// Set `NetID` (Join Accept / Rejoin Type 0/2).
+  #[must_use]
+  pub const fn net_id(mut self, id: NetId) -> Self {
+    self.net_id = Some(id);
+    self
+  }
+
+  /// Set `DLSettings` (Join Accept).
+  #[must_use]
+  pub const fn dl_settings(mut self, s: DlSettings) -> Self {
+    self.dl_settings = Some(s);
+    self
+  }
+
+  /// Set `RxDelay` (Join Accept).
+  #[must_use]
+  pub const fn rx_delay(mut self, r: u8) -> Self {
+    self.rx_delay = Some(r);
+    self
+  }
+
+  /// Set `CFList` (Join Accept).
+  #[must_use]
+  pub const fn cf_list(mut self, c: [u8; 16]) -> Self {
+    self.cf_list = Some(c);
+    self
+  }
+
+  /// Set `JoinReqType` (`LoRaWAN` 1.1 Join Accept MIC context).
+  #[must_use]
+  pub const fn join_req_type(mut self, t: u8) -> Self {
+    self.join_req_type = Some(t);
+    self
+  }
 }
 
 fn parse_rejoin_request(body: &[u8]) -> crate::Result<RejoinRequest> {
@@ -768,5 +873,19 @@ mod tests {
   #[test]
   fn builder_constructs() {
     let _b = LoraPacket::builder().data(Direction::Uplink, false);
+  }
+
+  #[test]
+  fn builder_chains_fields() {
+    let b = LoraPacket::builder()
+      .data(Direction::Downlink, false)
+      .dev_addr(DevAddr::new([1, 2, 3, 4]))
+      .f_cnt(7)
+      .f_port(1)
+      .payload(b"hi");
+    assert_eq!(b.dev_addr.unwrap().as_bytes(), &[1, 2, 3, 4]);
+    assert_eq!(b.f_cnt.unwrap(), 7);
+    assert_eq!(b.f_port.unwrap(), 1);
+    assert_eq!(b.payload.as_deref().unwrap(), b"hi");
   }
 }
