@@ -276,13 +276,7 @@ impl crate::codec::Data {
     } else {
       app_s_key.as_bytes()
     };
-    Ok(payload_crypt(
-      cipher,
-      key,
-      self.direction,
-      self.dev_addr,
-      self.f_cnt_32(f_cnt_msb),
-    ))
+    payload_crypt(cipher, key, self.direction, self.dev_addr, self.f_cnt_32(f_cnt_msb))
   }
 
   /// Encrypt the given plaintext under the `FRMPayload` keystream.
@@ -290,7 +284,7 @@ impl crate::codec::Data {
   /// Selects `NwkSKey` when `FPort == 0`, `AppSKey` otherwise.
   ///
   /// # Errors
-  /// Currently infallible.
+  /// `Error::PayloadTooLarge` if the plaintext exceeds 4080 bytes (255 AES blocks).
   pub fn encrypt_payload(
     &self,
     plaintext: &[u8],
@@ -303,13 +297,7 @@ impl crate::codec::Data {
     } else {
       app_s_key.as_bytes()
     };
-    Ok(payload_crypt(
-      plaintext,
-      key,
-      self.direction,
-      self.dev_addr,
-      self.f_cnt_32(f_cnt_msb),
-    ))
+    payload_crypt(plaintext, key, self.direction, self.dev_addr, self.f_cnt_32(f_cnt_msb))
   }
 }
 
@@ -319,7 +307,14 @@ fn payload_crypt(
   direction: crate::types::Direction,
   dev_addr: DevAddr,
   f_cnt_32: u32,
-) -> alloc::vec::Vec<u8> {
+) -> crate::Result<alloc::vec::Vec<u8>> {
+  // The block index byte (Ai[15]) is 1-based and only one byte wide. Anything
+  // beyond 255 blocks would overflow the index and silently produce ciphertext
+  // that no other LoRaWAN stack can decrypt.
+  let block_count = input.len().div_ceil(16);
+  if block_count > 255 {
+    return Err(crate::Error::PayloadTooLarge(input.len()));
+  }
   let dir_byte = u8::from(!matches!(direction, crate::types::Direction::Uplink));
   let mut out = alloc::vec::Vec::with_capacity(input.len());
   let mut addr = *dev_addr.as_bytes();
@@ -330,13 +325,14 @@ fn payload_crypt(
     ai[5] = dir_byte;
     ai[6..10].copy_from_slice(&addr);
     ai[10..14].copy_from_slice(&f_cnt_32.to_le_bytes());
-    ai[15] = u8::try_from(i_chunk + 1).unwrap_or(0xFF);
+    // Safe: block_count <= 255 guarded above, so i_chunk + 1 fits in a u8.
+    ai[15] = u8::try_from(i_chunk + 1).map_err(|_| crate::Error::PayloadTooLarge(input.len()))?;
     let s = aes_ecb_encrypt(&ai, key);
     for (j, b) in chunk.iter().enumerate() {
       out.push(b ^ s[j]);
     }
   }
-  out
+  Ok(out)
 }
 
 impl crate::codec::Data {
@@ -611,6 +607,38 @@ mod tests {
     let encrypted = crate::codec::JoinAccept::encrypt_for_wire(&plaintext, &app_key).unwrap();
     let expected = hex_to_vec("20e3de108795f776b8037610ef7869b5b3");
     assert_eq!(encrypted, expected);
+  }
+
+  #[test]
+  fn payload_crypt_rejects_oversize() {
+    // 256 AES-128 blocks: i_chunk + 1 would reach 256, overflowing the
+    // 1-byte block index in Ai[15]. The crypt must refuse rather than
+    // silently truncate the index.
+    use crate::codec::Data;
+    use crate::types::{Direction, FCtrl};
+
+    let huge_plaintext = alloc::vec![0u8; 16 * 256];
+    let data = Data {
+      direction: Direction::Uplink,
+      confirmed: false,
+      dev_addr: DevAddr::new([0u8; 4]),
+      f_ctrl: FCtrl(0),
+      f_cnt: [0, 0],
+      f_opts: alloc::vec![],
+      f_port: Some(1),
+      frm_payload: None,
+    };
+    let app_s_key = AppSKey::new([0u8; 16]);
+    let nwk_s_key = NwkSKey::new([0u8; 16]);
+    let err = data
+      .encrypt_payload(&huge_plaintext, &app_s_key, &nwk_s_key, 0)
+      .unwrap_err();
+    assert!(matches!(err, crate::Error::PayloadTooLarge(n) if n == 16 * 256));
+
+    // The boundary case: exactly 255 blocks (= 4080 bytes) must still succeed.
+    let max_plaintext = alloc::vec![0u8; 16 * 255];
+    let ok = data.encrypt_payload(&max_plaintext, &app_s_key, &nwk_s_key, 0).unwrap();
+    assert_eq!(ok.len(), 16 * 255);
   }
 
   /// `encrypt_for_wire` and `decrypt_from_wire` are inverses (the on-air

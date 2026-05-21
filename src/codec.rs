@@ -1000,7 +1000,10 @@ impl LoraPacketBuilder {
         let direction = self
           .direction
           .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: direction not set")))?;
-        let f_opts_len = u8::try_from(self.f_opts.len().min(15)).unwrap_or(15);
+        let f_opts_len = u8::try_from(self.f_opts.len()).map_err(|_| crate::Error::FOptsTooLong(self.f_opts.len()))?;
+        if f_opts_len > 15 {
+          return Err(crate::Error::FOptsTooLong(self.f_opts.len()));
+        }
         Payload::Data(Data {
           direction,
           confirmed: self.confirmed,
@@ -1496,6 +1499,17 @@ mod tests {
       ..Default::default()
     };
     assert!(packet.verify_mic_v1_0(&keys).unwrap());
+  }
+
+  #[test]
+  fn build_unsigned_rejects_fopts_too_long() {
+    let too_many = alloc::vec![0u8; 16];
+    let result = LoraPacket::builder()
+      .data(Direction::Uplink, false)
+      .dev_addr(DevAddr::new([0; 4]))
+      .f_opts(&too_many)
+      .build_unsigned();
+    assert!(matches!(result, Err(crate::Error::FOptsTooLong(16))));
   }
 
   #[test]
