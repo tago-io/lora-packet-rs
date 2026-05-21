@@ -1607,7 +1607,6 @@ mod tests {
     assert!(matches!(err, crate::Error::TooShort { .. }));
   }
 
-  /// Mirror of `__tests__/parse_test.ts`: "parses a Join Request"
   #[test]
   fn parse_join_request_known_vector() {
     let bytes = hex_to_vec("0039363463336913aa05693574323831338ef1c1d5ec6c");
@@ -1660,7 +1659,6 @@ mod tests {
     );
   }
 
-  /// Mirror of `__tests__/parse_test.ts`: "parses an unconfirmed data up"
   #[test]
   fn parse_data_up_known_vector() {
     let bytes = hex_to_vec("40f17dbe4900020001954378762b11ff0d");

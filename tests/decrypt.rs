@@ -1,5 +1,4 @@
-//! Integration tests mirroring `__tests__/decrypt_test.ts`.
-
+//! FRMPayload encrypt and decrypt tests.
 use lora_packet::{AppSKey, DevAddr, Direction, FCtrl, LoraPacket, NwkSKey};
 
 fn hex_to_vec(s: &str) -> Vec<u8> {
@@ -13,7 +12,6 @@ fn key_from_hex(s: &str) -> [u8; 16] {
   arr
 }
 
-/// Mirror of `__tests__/decrypt_test.ts`: "should decrypt test payload"
 #[test]
 fn should_decrypt_test_payload() {
   let bytes = hex_to_vec("40F17DBE4900020001954378762B11FF0D");
@@ -29,7 +27,6 @@ fn should_decrypt_test_payload() {
   assert_eq!(decrypted, b"test");
 }
 
-/// Mirror of `__tests__/decrypt_test.ts`: "should decrypt large payload"
 #[test]
 fn should_decrypt_large_payload() {
   let hex = "40f17dbe490004000155332de41a11adc072553544429ce7787707d1c316e027e7e5e334263376affb8aa17ad30075293f28dea8a20af3c5e7";
@@ -44,7 +41,6 @@ fn should_decrypt_large_payload() {
   assert_eq!(decrypted, b"The quick brown fox jumps over the lazy dog.");
 }
 
-/// Mirror of `__tests__/decrypt_test.ts`: "bad key scrambles payload"
 #[test]
 fn bad_key_scrambles_payload() {
   let bytes = hex_to_vec("40F17DBE4900020001954378762B11FF0D");
@@ -59,7 +55,6 @@ fn bad_key_scrambles_payload() {
   assert_eq!(decrypted, hex_to_vec("5999fc3f"));
 }
 
-/// Mirror of `__tests__/decrypt_test.ts`: "bad data lightly scrambles payload"
 #[test]
 fn bad_data_lightly_scrambles_payload() {
   // Single byte flipped in the ciphertext.
@@ -75,7 +70,6 @@ fn bad_data_lightly_scrambles_payload() {
   assert_eq!(decrypted, b"tbst");
 }
 
-/// Mirror of `__tests__/decrypt_test.ts`: "Should Decode Port 0"
 ///
 /// Build a packet with FPort = 0 (so the NwkSKey is used for FRMPayload
 /// crypt), then decrypt to recover the plaintext.

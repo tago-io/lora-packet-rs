@@ -1,5 +1,4 @@
-//! Integration tests mirroring `__tests__/fopts_test.ts`.
-
+//! FOpts encrypt and decrypt tests (LoRaWAN 1.1).
 use lora_packet::{
   AppSKey, DevAddr, Direction, FCtrl, FNwkSIntKey, LoraPacket, NwkSEncKey, NwkSKey, SNwkSIntKey, V1_0MicKeys,
   V1_1MicKeys,
@@ -16,7 +15,6 @@ fn key_from_hex(s: &str) -> [u8; 16] {
   arr
 }
 
-/// Mirror of `__tests__/fopts_test.ts`: "should parse packet #1"
 #[test]
 fn should_parse_packet_1() {
   let bytes = hex_to_vec("4084412505A3010009110308B33750F504D4B86A");
@@ -25,7 +23,6 @@ fn should_parse_packet_1() {
   assert_eq!(d.f_opts, hex_to_vec("091103"));
 }
 
-/// Mirror of `__tests__/fopts_test.ts`:
 /// "should encode packet with Lorawan11 Encrypted Fopts"
 ///
 /// Downlink with FPort > 0 (the `aFCntDown` path; `fopts_crypt` uses 0x02
@@ -88,7 +85,6 @@ fn should_encode_packet_with_lorawan_1_1_encrypted_fopts() {
   assert_eq!(packet.mic, [0xaa, 0x5e, 0xd1, 0x3a]);
 }
 
-/// Mirror of `__tests__/fopts_test.ts`:
 /// "should decode packet with Lorawan1.0 Encrypted Fopts"
 ///
 /// The TS test parses a wire packet (provided as base64; we use the hex
@@ -121,7 +117,6 @@ fn should_decode_packet_with_lorawan_1_0_encrypted_fopts() {
   assert_eq!(decrypted_payload, hex_to_vec("01020304"));
 }
 
-/// Mirror of `__tests__/fopts_test.ts`:
 /// "should decode rekeyind packet with Lorawan11 Encrypted"
 #[test]
 fn should_decode_rekeyind_packet_with_lorawan_1_1_encrypted() {
@@ -153,7 +148,6 @@ fn should_decode_rekeyind_packet_with_lorawan_1_1_encrypted() {
   assert_eq!(decrypted, hex_to_vec("0B01"));
 }
 
-/// Mirror of `__tests__/fopts_test.ts`:
 /// "should encrypt rekeyconf packet with Lorawan11 Encrypted"
 ///
 /// Identical test body to "should decode rekeyind packet..." in the TS

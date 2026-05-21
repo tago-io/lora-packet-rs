@@ -1,13 +1,9 @@
-//! Integration tests mirroring `__tests__/packet_test.ts`.
+//! Round-trip and builder construction tests.
 //!
-//! The TypeScript `LoraPayload.fromFields(...)` API builds packets and (when
-//! keys are provided) signs and encrypts them. The Rust equivalent is
-//! `LoraPacket::builder()` plus `build_unsigned` / `sign_and_encrypt` /
-//! `sign_join_request` / `sign_join_accept`.
-//!
-//! When the TS test provides no keys, the placeholder MIC is `EEEEEEEE`. The
-//! Rust builder defaults the MIC to `00000000`. Tests that depend on the
-//! placeholder MIC value are adjusted to check the zero MIC instead.
+//! Each builder entry point is exercised: `data` + `sign_and_encrypt`,
+//! `join_request` + `sign_join_request`, `join_accept` + `sign_join_accept`,
+//! and `build_unsigned` for cases where the caller fills the MIC explicitly.
+//! `build_unsigned` produces a zero MIC; tests assert against that.
 
 use lora_packet::{
   AppEui, AppKey, AppNonce, AppSKey, DevAddr, DevEui, DevNonce, Direction, DlSettings, FCtrl, FNwkSIntKey, JoinAccept,
@@ -25,7 +21,6 @@ fn key_from_hex(s: &str) -> [u8; 16] {
   arr
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create packet with minimal input"
 ///
 /// TS: `LoraPayload.fromFields({ payload: "test", DevAddr: 0xa1b2c3d4 })`.
 /// No keys supplied -> default MType is "Unconfirmed Data Up", default FCnt 0,
@@ -63,7 +58,6 @@ fn should_create_packet_with_minimal_input() {
   assert_eq!(parsed, packet);
 }
 
-/// Mirror of `__tests__/packet_test.ts`:
 /// "should omit FPort if no FRMPayload & no FPort supplied"
 #[test]
 fn should_omit_fport_if_no_payload_or_port() {
@@ -96,7 +90,6 @@ fn should_omit_fport_if_no_payload_or_port() {
   assert_eq!(parsed, packet);
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create packet with MType as integer"
 ///
 /// TS: `MType: 5` selects "Confirmed Data Down". Rust has a typed enum.
 #[test]
@@ -126,7 +119,6 @@ fn should_create_packet_with_mtype_as_integer_5() {
   assert_eq!(parsed, packet);
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create packet with MType as string"
 ///
 /// TS: `MType: "Confirmed Data Up"`.
 #[test]
@@ -151,7 +143,6 @@ fn should_create_packet_with_mtype_as_string_confirmed_data_up() {
   assert_eq!(parsed, packet);
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should verify MType confirmed"
 #[test]
 fn should_verify_mtype_confirmed() {
   let packet = LoraPacket::builder()
@@ -165,7 +156,6 @@ fn should_verify_mtype_confirmed() {
   assert!(packet.is_confirmed());
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should verify MType unconfirmed"
 #[test]
 fn should_verify_mtype_unconfirmed() {
   let packet = LoraPacket::builder()
@@ -179,7 +169,6 @@ fn should_verify_mtype_unconfirmed() {
   assert!(!packet.is_confirmed());
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create packet with FCnt as buffer"
 ///
 /// TS: `FCnt: Buffer.from("1234", "hex")` (big-endian 0x1234 = 4660).
 #[test]
@@ -207,7 +196,6 @@ fn should_create_packet_with_fcnt_as_buffer() {
   assert_eq!(parsed, packet);
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create packet with FCnt as number"
 #[test]
 fn should_create_packet_with_fcnt_as_number() {
   let packet = LoraPacket::builder()
@@ -232,7 +220,6 @@ fn should_create_packet_with_fcnt_as_number() {
   assert_eq!(parsed, packet);
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create packet with FOpts"
 #[test]
 fn should_create_packet_with_fopts() {
   let packet = LoraPacket::builder()
@@ -258,7 +245,6 @@ fn should_create_packet_with_fopts() {
   assert_eq!(parsed, packet);
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create packet with correct FCtrl.ACK"
 #[test]
 fn should_create_packet_with_correct_fctrl_ack() {
   let packet_ack_true = LoraPacket::builder()
@@ -286,7 +272,6 @@ fn should_create_packet_with_correct_fctrl_ack() {
   assert!(!d.f_ctrl.ack());
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create packet with correct FCtrl.ADR"
 #[test]
 fn should_create_packet_with_correct_fctrl_adr() {
   let packet_adr_true = LoraPacket::builder()
@@ -314,7 +299,6 @@ fn should_create_packet_with_correct_fctrl_adr() {
   assert!(!d.f_ctrl.adr());
 }
 
-/// Mirror of `__tests__/packet_test.ts`:
 /// "should create packet with correct FCtrl when all flags set"
 #[test]
 fn should_create_packet_with_correct_fctrl_all_flags() {
@@ -336,7 +320,6 @@ fn should_create_packet_with_correct_fctrl_all_flags() {
   assert!(d.f_ctrl.class_b());
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create join request packet"
 #[test]
 fn should_create_join_request_packet() {
   let packet = LoraPacket::builder()
@@ -366,7 +349,6 @@ fn should_create_join_request_packet() {
   assert_eq!(parsed, packet);
 }
 
-/// Mirror of `__tests__/packet_test.ts`:
 /// "should create join accept packet with minimal input"
 #[test]
 fn should_create_join_accept_packet_with_minimal_input() {
@@ -394,7 +376,6 @@ fn should_create_join_accept_packet_with_minimal_input() {
   assert!(ja.cf_list.is_none());
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create join accept packet"
 #[test]
 fn should_create_join_accept_packet() {
   let packet = LoraPacket::builder()
@@ -418,7 +399,6 @@ fn should_create_join_accept_packet() {
   assert!(ja.cf_list.is_none());
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create join accept packet with CFList"
 #[test]
 fn should_create_join_accept_packet_with_cflist() {
   let cf_list_bytes = hex_to_vec("11223311223311223311223311223300");
@@ -445,7 +425,6 @@ fn should_create_join_accept_packet_with_cflist() {
   assert_eq!(ja.cf_list.unwrap(), cf_list);
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create packet with correct FPort"
 #[test]
 fn should_create_packet_with_correct_fport() {
   let packet = LoraPacket::builder()
@@ -458,7 +437,6 @@ fn should_create_packet_with_correct_fport() {
   assert_eq!(packet.as_data().unwrap().f_port, Some(42));
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should calculate MIC if keys provided"
 #[test]
 fn should_calculate_mic_if_keys_provided() {
   let app_s_key = AppSKey::new(key_from_hex("ec925802ae430ca77fd3dd73cb2cc588"));
@@ -487,7 +465,6 @@ fn should_calculate_mic_if_keys_provided() {
   assert_eq!(parsed, packet);
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should encrypt if keys provided"
 ///
 /// Same expected output as the MIC test above; the TS test duplicates the
 /// vector but emphasises that encryption happened in the builder.
@@ -509,7 +486,6 @@ fn should_encrypt_if_keys_provided() {
   assert_eq!(packet.phy_payload, expected_phy_payload);
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should parse packet #1"
 #[test]
 fn should_parse_packet_1() {
   let bytes = hex_to_vec("4084412505A3010009110308B33750F504D4B86A");
@@ -518,7 +494,6 @@ fn should_parse_packet_1() {
   assert_eq!(d.f_opts, hex_to_vec("091103"));
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create packet with port 0"
 #[test]
 fn should_create_packet_with_port_0() {
   let nwk_s_key = NwkSKey::new(key_from_hex("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"));
@@ -546,7 +521,6 @@ fn should_create_packet_with_port_0() {
   assert!(d.f_opts.is_empty());
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should create packet with OptNeg"
 ///
 /// `LoRaWAN` 1.1 Join Accept with OptNeg bit set. The 1.1 MIC algorithm needs
 /// `JoinReqType`, `JoinEUI` and `DevNonce` context. Uses `sign_join_accept` via
@@ -593,7 +567,6 @@ fn should_create_packet_with_opt_neg() {
   assert_eq!(encrypted, expected_encrypted);
 }
 
-/// Mirror of `__tests__/packet_test.ts`: "should encode packet with Lorawan10"
 #[test]
 fn should_encode_packet_with_lorawan_1_0() {
   let nwk_s_key = NwkSKey::new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
@@ -615,7 +588,6 @@ fn should_encode_packet_with_lorawan_1_0() {
   );
 }
 
-/// Mirror of `__tests__/packet_test.ts`:
 /// "should encode packet with Lorawan11 (1. FRMPayload data)"
 ///
 /// LoRaWAN 1.1 dual-MIC uplink. The Rust API doesn't have a one-shot
@@ -672,7 +644,6 @@ fn should_encode_packet_with_lorawan_1_1_frm_payload() {
   assert_eq!(packet.phy_payload, expected);
 }
 
-/// Mirror of `__tests__/packet_test.ts`:
 /// "should encode packet with Lorawan11 (2. FRMPayload data with ACK)"
 ///
 /// ACK is set, so the confirmed FCnt down is used in B1. In TS the bytes are
@@ -724,7 +695,6 @@ fn should_encode_packet_with_lorawan_1_1_frm_payload_with_ack() {
   assert_eq!(packet.phy_payload, expected);
 }
 
-/// Mirror of `__tests__/packet_test.ts`:
 /// "should encode packet with Lorawan11 (3. Mac-commands in FOpts using NFCntDown)"
 ///
 /// Downlink with FOpts encrypted via NwkSEncKey and no FPort (so NFCntDown
@@ -771,7 +741,6 @@ fn should_encode_packet_with_lorawan_1_1_fopts_nfcntdown() {
   assert_eq!(packet.phy_payload, expected);
 }
 
-/// Mirror of `__tests__/packet_test.ts`:
 /// "should encode packet with Lorawan11 (4. Mac-commands in FOpts using AFCntDown)"
 ///
 /// Downlink with FOpts (plaintext) + FPort > 0. The TS test does NOT call
@@ -807,7 +776,6 @@ fn should_encode_packet_with_lorawan_1_1_fopts_afcntdown() {
   assert_eq!(packet.phy_payload, expected);
 }
 
-/// Mirror of `__tests__/packet_test.ts`:
 /// "should encode packet with Lorawan11 (5. Mac-commands in FRMPayload)"
 #[test]
 fn should_encode_packet_with_lorawan_1_1_fopts_in_frm_payload() {

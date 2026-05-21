@@ -20,11 +20,6 @@ If you are an AI coding agent landing in this repo, read this section first.
 - **Where to start reading**: `src/lib.rs` (crate-level guide and
   re-exports) -> `src/codec.rs::LoraPacket::from_wire` and
   `src/codec.rs::LoraPacketBuilder` for the main API surface.
-- **Parity floor (non-negotiable)**: every test in
-  `/Users/felipefdl/Projects/tago/lora-packet/__tests__/*.ts` (except CLI)
-  must have a Rust mirror in `tests/*.rs` with the same inputs and
-  expected outputs. The Rust test's doc comment names its TS source for
-  traceability.
 - **Where the integration guide lives**: `docs/AGENT_INTEGRATION.md` covers
   downstream patterns (Lambda middleware, embedded firmware) and common
   anti-patterns when wiring this crate into a larger system.
@@ -170,34 +165,36 @@ both. Code that violates any of them must not be merged.
 | Publish dry-run              | `cargo publish --dry-run --all-features`                        |
 | MSRV check                   | `cargo +1.95 check --all-features`                              |
 
-## Test parity rule (critical)
+## Test layout
 
-Every TypeScript test in `/Users/felipefdl/Projects/tago/lora-packet/__tests__/`
-(except CLI) MUST have a Rust mirror in `tests/*.rs` with the SAME inputs
-and SAME expected outputs.
+Integration tests live in `tests/*.rs`, one file per concern:
 
-TS file → Rust file:
+| File                              | Coverage                                       |
+| --------------------------------- | ---------------------------------------------- |
+| `tests/parse.rs`                  | wire-format parsing per message type           |
+| `tests/packet.rs`                 | round-trips and builder construction           |
+| `tests/mic.rs`                    | MIC vectors for 1.0 and 1.1                    |
+| `tests/decrypt.rs`                | `FRMPayload` crypt vectors                     |
+| `tests/fopts.rs`                  | `FOpts` crypt vectors (1.1)                    |
+| `tests/key_gen.rs`                | OTAA, Join Server, and WOR key derivation      |
+| `tests/join_accept_encrypt.rs`    | server-side Join Accept crypt                  |
+| `tests/edge_parse.rs`             | parser edge cases and malformed input          |
+| `tests/boundary.rs`               | boundary-condition exercises                   |
+| `tests/negative.rs`               | rejection of invalid input                     |
+| `tests/cross_version.rs`          | 1.0 vs 1.1 dispatch                            |
+| `tests/round_trip_exhaustive.rs`  | exhaustive round-trips per variant             |
+| `tests/builder_validation.rs`     | builder field validation                       |
+| `tests/newtype_invariants.rs`     | newtype Debug/Zeroize/Clone/Hash invariants    |
+| `tests/usage_scenarios.rs`        | end-to-end flows (OTAA, uplink, downlink)      |
+| `tests/thread_safety.rs`          | `Send` and `Sync` invariants                   |
+| `tests/serde.rs`                  | serde derive smoke test                        |
+| `tests/hex_base64.rs`             | optional feature constructors                  |
+| `tests/no_std_smoke.rs`           | `no_std + alloc` build smoke test              |
 
-| TS                              | Rust                                  |
-| ------------------------------- | ------------------------------------- |
-| `__tests__/parse_test.ts`       | `tests/parse.rs`                      |
-| `__tests__/packet_test.ts`      | `tests/packet.rs`                     |
-| `__tests__/mic_test.ts`         | `tests/mic.rs`                        |
-| `__tests__/decrypt_test.ts`     | `tests/decrypt.rs`                    |
-| `__tests__/fopts_test.ts`       | `tests/fopts.rs`                      |
-| `__tests__/key_gen_test.ts`     | `tests/key_gen.rs`                    |
-| `__tests__/join_accept_encrypt.ts` | `tests/join_accept_encrypt.rs`     |
-
-Each Rust test has a doc comment naming its TS source, e.g.:
-
-```rust
-/// Mirror of `__tests__/parse_test.ts`: "parses a Join Request"
-#[test]
-fn parse_join_request_known_vector() { /* ... */ }
-```
-
-If you add a TS-side vector that this crate must also handle, port it to
-the matching Rust file in the same PR.
+Add tests next to the file that owns the area you are changing. Verify
+both `cargo test --all-features` and `cargo test --no-default-features`
+pass; the `no_std_smoke` target catches accidental `std::` usage in the
+public API.
 
 ## Working on this crate
 
@@ -217,12 +214,13 @@ the matching Rust file in the same PR.
 ### Modifying the codec
 
 - Wire fields are little-endian; struct fields are big-endian (display
-  order). The `*_test.ts` vectors in the TS reference are wire bytes; the
-  Rust struct fields display reversed.
+  order). Hex strings in `tests/*.rs` are always the on-wire form; the
+  parsed struct fields appear reversed.
 - After any change to `from_wire` or `to_wire`, confirm the round-trip
-  property holds for every `__tests__/parse_test.ts` vector. The
-  proptest in `codec::prop_tests::from_wire_never_panics` guards against
-  panics on arbitrary inputs.
+  property holds for every vector under `tests/round_trip_exhaustive.rs`
+  and `tests/parse.rs`. The proptest in
+  `codec::prop_tests::from_wire_never_panics` guards against panics on
+  arbitrary inputs.
 - `LoraPacket::phy_payload` is the source of truth for MIC computation
   (every MIC routine slices it). When you mutate fields, regenerate
   `phy_payload` via `to_wire()` before calling a MIC routine.
@@ -271,9 +269,8 @@ the matching Rust file in the same PR.
   need the bytes.
 - **Do not match on `Error` `Display` strings.** Match on the variant.
   String wording can change between releases.
-- **When in doubt about a byte layout**, open the LoRaWAN spec or read
-  the TS reference at `/Users/felipefdl/Projects/tago/lora-packet/src/lib/`
-  before guessing.
+- **When in doubt about a byte layout**, consult the `LoRaWAN` 1.0.x or
+  1.1 specification (linked from the README) before guessing.
 
 ## Commits and PRs
 

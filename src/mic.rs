@@ -309,7 +309,6 @@ mod tests {
     assert!(!mic_eq([1, 2, 3, 4], [1, 2, 3, 5]));
   }
 
-  /// Mirror of `__tests__/mic_test.ts`: "should calculate & verify correct join request packet MIC in 1.1"
   #[test]
   fn join_request_mic_1_1_vector() {
     use crate::codec::LoraPacket;

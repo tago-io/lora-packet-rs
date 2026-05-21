@@ -699,7 +699,6 @@ mod tests {
     arr
   }
 
-  /// Mirror of `__tests__/decrypt_test.ts`: "should decrypt test payload".
   #[test]
   fn decrypt_payload_test_text() {
     let bytes = hex_to_vec("40f17dbe4900020001954378762b11ff0d");
@@ -728,9 +727,8 @@ mod tests {
     assert_eq!(decrypted, plain);
   }
 
-  /// Vector from <https://pkg.go.dev/github.com/brocaar/lorawan>, mirrored in
-  /// `__tests__/fopts_test.ts`: "should encode packet with Lorawan11
-  /// Encrypted Fopts". Downlink with `FPort` > 0 means `aFCntDown` is true.
+  /// Reference vector from <https://pkg.go.dev/github.com/brocaar/lorawan>.
+  /// Downlink with `FPort` > 0 means `aFCntDown` is true.
   #[test]
   fn encrypt_fopts_1_1_vector() {
     use crate::codec::Data;
@@ -756,8 +754,8 @@ mod tests {
     assert_eq!(decrypted, [0x02, 0x07, 0x01]);
   }
 
-  /// Mirror of `__tests__/join_accept_encrypt.ts`: "should create join
-  /// accept packet with zero value" (server-side encrypt produces wire form).
+  /// Server-side encrypt of a zero-valued Join Accept body produces the
+  /// known on-air ciphertext under a zero `AppKey`.
   #[test]
   fn join_accept_encrypt_zero_app_key() {
     let app_key = AppKey::new([0u8; 16]);

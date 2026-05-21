@@ -1,5 +1,4 @@
-//! Integration tests mirroring `__tests__/join_accept_encrypt.ts`.
-
+//! Server-side Join Accept encrypt and on-air decrypt tests.
 use lora_packet::{
   AppEui, AppKey, AppNonce, DevAddr, DevNonce, DlSettings, JoinAccept, LoraPacket, NetId, NwkKey, V1_1MicKeys,
 };
@@ -8,7 +7,6 @@ fn hex_to_vec(s: &str) -> Vec<u8> {
   hex::decode(s).expect("valid hex string")
 }
 
-/// Mirror of `__tests__/join_accept_encrypt.ts`:
 /// "should create join accept packet with zero value"
 ///
 /// Build a Join Accept with all-zero fields under an all-zero AppKey, sign
@@ -59,7 +57,6 @@ fn should_create_join_accept_packet_with_zero_value() {
   assert!(parsed.cf_list.is_none());
 }
 
-/// Mirror of `__tests__/join_accept_encrypt.ts`:
 /// "should create join accept as in brocaar/lorawan 1.1"
 ///
 /// Builds a `LoRaWAN` 1.1 Join Accept with OptNeg set, signs under JSIntKey

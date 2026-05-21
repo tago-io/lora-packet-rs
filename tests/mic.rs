@@ -1,5 +1,4 @@
-//! Integration tests mirroring `__tests__/mic_test.ts`.
-
+//! MIC calculate, verify, and recalculate tests for LoRaWAN 1.0 and 1.1.
 use lora_packet::{AppKey, FNwkSIntKey, LoraPacket, NwkKey, NwkSKey, SNwkSIntKey, V1_0MicKeys, V1_1MicKeys};
 
 fn hex_to_vec(s: &str) -> Vec<u8> {
@@ -13,7 +12,6 @@ fn key_from_hex(s: &str) -> [u8; 16] {
   arr
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should calculate & verify correct data packet MIC" (vector #1)
 #[test]
 fn should_calculate_and_verify_correct_data_packet_mic_1() {
@@ -28,7 +26,6 @@ fn should_calculate_and_verify_correct_data_packet_mic_1() {
   assert!(packet.verify_mic_v1_0(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should calculate & verify correct data packet MIC" (vector #2)
 #[test]
 fn should_calculate_and_verify_correct_data_packet_mic_2() {
@@ -43,7 +40,6 @@ fn should_calculate_and_verify_correct_data_packet_mic_2() {
   assert!(packet.verify_mic_v1_0(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`: "should detect incorrect data packet MIC"
 #[test]
 fn should_detect_incorrect_data_packet_mic() {
   // Last byte AA instead of AF
@@ -60,7 +56,6 @@ fn should_detect_incorrect_data_packet_mic() {
   assert!(!packet.verify_mic_v1_0(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should calculate & verify correct data packet MIC for ACK"
 #[test]
 fn should_calculate_and_verify_correct_data_packet_mic_for_ack() {
@@ -75,7 +70,6 @@ fn should_calculate_and_verify_correct_data_packet_mic_for_ack() {
   assert!(packet.verify_mic_v1_0(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "recalculateMIC should calculate & overwrite existing data packet MIC"
 #[test]
 fn recalculate_mic_overwrites_existing_data_packet_mic() {
@@ -101,7 +95,6 @@ fn recalculate_mic_overwrites_existing_data_packet_mic() {
   assert_eq!(packet.mic, [0xf9, 0xd6, 0x5d, 0x27]);
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "recalculateMIC should calculate & overwrite existing data packet MIC and
 /// Update PHYpayload & MACPayloadWithMIC"
 #[test]
@@ -125,7 +118,6 @@ fn recalculate_mic_updates_phy_payload() {
   assert_eq!(packet.phy_payload, expected_phy_payload);
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should calculate & verify correct join request packet MIC"
 #[test]
 fn should_calculate_and_verify_correct_join_request_mic() {
@@ -141,7 +133,6 @@ fn should_calculate_and_verify_correct_join_request_mic() {
   assert!(packet.verify_mic_v1_0(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should detect incorrect join request packet MIC"
 #[test]
 fn should_detect_incorrect_join_request_mic() {
@@ -158,7 +149,6 @@ fn should_detect_incorrect_join_request_mic() {
   assert!(!packet.verify_mic_v1_0(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should calculate & verify correct join accept packet MIC"
 ///
 /// The wire bytes here are treated as a plaintext Join Accept (MHDR + body +
@@ -189,7 +179,6 @@ fn should_calculate_and_verify_correct_join_accept_mic() {
   assert!(packet.verify_mic_v1_0(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should detect incorrect join accept packet MIC"
 #[test]
 fn should_detect_incorrect_join_accept_mic() {
@@ -214,7 +203,6 @@ fn should_detect_incorrect_join_accept_mic() {
   assert!(!packet.verify_mic_v1_0(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should calculate & verify MIC when 32-bit FCnts are used"
 ///
 /// The TS test passes an explicit 16-bit FCnt MSB of 0x0000 alongside the
@@ -233,7 +221,6 @@ fn should_calculate_and_verify_mic_with_32bit_fcnts() {
   assert!(packet.verify_mic_v1_0(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`: "should calculate & verify MIC in port 0"
 #[test]
 fn should_calculate_and_verify_mic_in_port_0() {
   let bytes = hex_to_vec("4006DC00FCC07400000244925050");
@@ -248,7 +235,6 @@ fn should_calculate_and_verify_mic_in_port_0() {
   assert!(packet.verify_mic_v1_0(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should calculate & verify MIC when 1.0 are used (Matteo Packets)"
 ///
 /// TS uses both NwkSKey and a second key; only the NwkSKey result is checked
@@ -266,7 +252,6 @@ fn should_calculate_mic_when_1_0_used_matteo_packets() {
   assert_eq!(packet.calculate_mic_v1_0(&keys).unwrap(), [0xd6, 0x47, 0x0f, 0xc3]);
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should calculate & verify correct join request packet MIC in 1.1"
 #[test]
 fn should_calculate_and_verify_join_request_mic_1_1() {
@@ -281,7 +266,6 @@ fn should_calculate_and_verify_join_request_mic_1_1() {
   assert!(packet.verify_mic_v1_1(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should calculate & verify incorrect join request packet MIC in 1.1"
 #[test]
 fn should_detect_incorrect_join_request_mic_1_1() {
@@ -297,7 +281,6 @@ fn should_detect_incorrect_join_request_mic_1_1() {
   assert!(!packet.verify_mic_v1_1(&keys).unwrap());
 }
 
-/// Mirror of `__tests__/mic_test.ts`:
 /// "should calculate & verify correct unconfirmed data up packet MIC 1.1"
 #[test]
 fn should_calculate_and_verify_unconfirmed_data_up_mic_1_1() {

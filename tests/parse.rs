@@ -1,10 +1,7 @@
-//! Integration tests mirroring `__tests__/parse_test.ts`.
+//! Wire-format parsing tests for [`LoraPacket::from_wire`].
 //!
-//! Every test in this file has a matching `it(...)` block in the TypeScript
-//! source. The Rust API surface uses typed accessors (`as_data`,
-//! `as_join_request`, `as_join_accept`, `as_rejoin_request`) instead of
-//! generic field access, so assertions are written against the appropriate
-//! variant.
+//! Assertions use the typed variant accessors (`as_data`, `as_join_request`,
+//! `as_join_accept`, `as_rejoin_request`) rather than generic field access.
 
 use lora_packet::{Direction, LoraPacket, MType, Payload};
 
@@ -12,7 +9,6 @@ fn hex_to_vec(s: &str) -> Vec<u8> {
   hex::decode(s).expect("valid hex string")
 }
 
-/// Mirror of `__tests__/parse_test.ts`: "should parse data payload"
 #[test]
 fn parse_data_payload() {
   let bytes = hex_to_vec("40F17DBE4900020001954378762B11FF0D");
@@ -39,7 +35,6 @@ fn parse_data_payload() {
   assert_eq!(d.f_port, Some(1));
 }
 
-/// Mirror of `__tests__/parse_test.ts`: "should parse join request payload"
 #[test]
 fn parse_join_request_payload() {
   let bytes = hex_to_vec("0039363463336913AA05693574323831338EF1C1D5EC6C");
@@ -63,7 +58,6 @@ fn parse_join_request_payload() {
   assert_eq!(parsed.m_type(), MType::JoinRequest);
 }
 
-/// Mirror of `__tests__/parse_test.ts`: "should parse join accept payload"
 ///
 /// The TS API parses a Join Accept by treating the wire bytes as plaintext;
 /// the Rust API exposes the same thing via `JoinAccept::from_plaintext`.
@@ -95,7 +89,6 @@ impl JoinAcceptNonceAlias for lora_packet::JoinAccept {
   }
 }
 
-/// Mirror of `__tests__/parse_test.ts`: "should parse data payload with empty payload"
 #[test]
 fn parse_data_payload_with_empty_payload() {
   let bytes = hex_to_vec("40F17DBE49000300012A3518AF");
@@ -121,7 +114,6 @@ fn parse_data_payload_with_empty_payload() {
   assert!(!d.f_ctrl.adr());
 }
 
-/// Mirror of `__tests__/parse_test.ts`: "should parse large data payload"
 #[test]
 fn parse_large_data_payload() {
   let hex = "40f17dbe490004000155332de41a11adc072553544429ce7787707d1c316e027e7e5e334263376affb8aa17ad30075293f28dea8a20af3c5e7";
@@ -149,7 +141,6 @@ fn parse_large_data_payload() {
   assert!(!d.f_ctrl.adr());
 }
 
-/// Mirror of `__tests__/parse_test.ts`: "should parse ack"
 #[test]
 fn parse_ack() {
   let bytes = hex_to_vec("60f17dbe4920020001f9d65d27");
@@ -174,7 +165,6 @@ fn parse_ack() {
   assert!(!d.f_ctrl.adr());
 }
 
-/// Mirror of `__tests__/parse_test.ts`: "should Join Accept"
 ///
 /// The TS test fixture has 32 wire bytes (body = 27 bytes), which does not
 /// match either valid Join Accept body length (12 or 28). The TS parser is
@@ -197,7 +187,6 @@ fn parse_join_accept_with_dl_settings() {
   assert!(matches!(err, lora_packet::Error::TooShort { .. }));
 }
 
-/// Mirror of `__tests__/parse_test.ts`: "should parse proprietary packets"
 #[test]
 fn parse_proprietary_packets() {
   let bytes = hex_to_vec("E0008B658839");
@@ -214,7 +203,6 @@ fn parse_proprietary_packets() {
   assert_eq!(parsed.m_type(), MType::Proprietary);
 }
 
-/// Mirror of `__tests__/parse_test.ts`: "should parse Rejoin Request packets"
 #[test]
 fn parse_rejoin_request_packets() {
   let bytes = hex_to_vec("C000112233112233445566778811228B658839");

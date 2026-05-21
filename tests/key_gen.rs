@@ -1,5 +1,4 @@
-//! Integration tests mirroring `__tests__/key_gen_test.ts`.
-
+//! OTAA, Join Server, and WOR / Relay session-key derivation tests.
 use lora_packet::{
   AppKey, AppNonce, DevAddr, DevEui, DevNonce, JoinEui, JoinServerKeys, NetId, NwkKey, NwkSKey, SessionKeys10,
   SessionKeys11, WorKeys,
@@ -16,7 +15,6 @@ fn key_from_hex(s: &str) -> [u8; 16] {
   arr
 }
 
-/// Mirror of `__tests__/key_gen_test.ts`:
 /// "should generate valid session keys 1.0"
 #[test]
 fn should_generate_valid_session_keys_1_0() {
@@ -36,7 +34,6 @@ fn should_generate_valid_session_keys_1_0() {
   );
 }
 
-/// Mirror of `__tests__/key_gen_test.ts`:
 /// "should generate valid session keys 1.1"
 #[test]
 fn should_generate_valid_session_keys_1_1() {
@@ -84,7 +81,6 @@ fn should_generate_valid_session_keys_1_1() {
   );
 }
 
-/// Mirror of `__tests__/key_gen_test.ts`: "should generate JS keys"
 #[test]
 fn should_generate_js_keys() {
   let nwk_key = NwkKey::new(key_from_hex("089234b089c2d8490edf8c9f9b8e8f9c"));
@@ -100,7 +96,6 @@ fn should_generate_js_keys() {
   );
 }
 
-/// Mirror of `__tests__/key_gen_test.ts`: "should generate WOR Root key"
 #[test]
 fn should_generate_wor_root_key() {
   let nwk_s_key = NwkSKey::new(key_from_hex("987b94c9e254bee0546bb23403492d34"));
@@ -108,7 +103,6 @@ fn should_generate_wor_root_key() {
   assert_eq!(hex::encode(root.as_bytes()), "df6c096ba343b7a38a32bec967f03453");
 }
 
-/// Mirror of `__tests__/key_gen_test.ts`: "should generate WOR Session keys"
 ///
 /// The TS test passes `"012345678"` as the DevAddr hex string; `Buffer.from`
 /// parses only valid hex pairs and yields 4 bytes `[0x01, 0x23, 0x45, 0x67]`.
@@ -127,7 +121,6 @@ fn should_generate_wor_session_keys() {
   );
 }
 
-/// Mirror of `__tests__/key_gen_test.ts`:
 /// "should generate valid session keys 1.1 with optNeg Unset"
 ///
 /// The TS test passes a 3-byte `netId` buffer as the JoinEUI parameter; the
@@ -168,7 +161,6 @@ fn should_generate_valid_session_keys_1_1_with_opt_neg_unset() {
   );
 }
 
-/// Mirror of `__tests__/key_gen_test.ts`:
 /// "should generate valid session keys 1.1 Broccar parameters with OptNeg Set"
 #[test]
 fn should_generate_valid_session_keys_1_1_broccar_opt_neg_set() {
@@ -197,7 +189,6 @@ fn should_generate_valid_session_keys_1_1_broccar_opt_neg_set() {
   );
 }
 
-/// Mirror of `__tests__/key_gen_test.ts`: "should generate JS keys in 1.1"
 #[test]
 fn should_generate_js_keys_in_1_1() {
   let nwk_key = NwkKey::new(key_from_hex("01010101010101010101010101010101"));
