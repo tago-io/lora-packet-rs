@@ -76,7 +76,7 @@ The `no_std + alloc` mode covers Cortex-M targets with a global allocator.
 
 ```toml
 [dependencies]
-lora-packet = { version = "0.1", default-features = false }
+lora-packet = { version = "1", default-features = false }
 ```
 
 ```rust,ignore
