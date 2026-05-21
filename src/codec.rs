@@ -523,6 +523,30 @@ impl LoraPacket {
   }
 }
 
+#[cfg(feature = "hex_base64")]
+impl LoraPacket {
+  /// Parse from a hex-encoded wire frame.
+  ///
+  /// # Errors
+  /// [`crate::Error::Hex`] for invalid hex; otherwise any error from
+  /// [`LoraPacket::from_wire`].
+  pub fn from_hex(s: &str) -> crate::Result<Self> {
+    let bytes = hex::decode(s)?;
+    Self::from_wire(&bytes)
+  }
+
+  /// Parse from a standard base64-encoded wire frame.
+  ///
+  /// # Errors
+  /// [`crate::Error::Base64`] for invalid base64; otherwise any error from
+  /// [`LoraPacket::from_wire`].
+  pub fn from_base64(s: &str) -> crate::Result<Self> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(s)?;
+    Self::from_wire(&bytes)
+  }
+}
+
 impl JoinAccept {
   /// Parse an already-decrypted Join Accept (MHDR + body + MIC).
   ///

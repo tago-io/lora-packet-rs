@@ -67,6 +67,30 @@ pub enum Error {
   /// Generic catch-all with a string message (used sparingly).
   #[error("{0}")]
   Other(String),
+
+  /// Hex decoding failed (only available with the `hex_base64` feature).
+  #[cfg(feature = "hex_base64")]
+  #[error("hex decode error: {0}")]
+  Hex(hex::FromHexError),
+
+  /// Base64 decoding failed (only available with the `hex_base64` feature).
+  #[cfg(feature = "hex_base64")]
+  #[error("base64 decode error: {0}")]
+  Base64(base64::DecodeError),
+}
+
+#[cfg(feature = "hex_base64")]
+impl From<hex::FromHexError> for Error {
+  fn from(e: hex::FromHexError) -> Self {
+    Self::Hex(e)
+  }
+}
+
+#[cfg(feature = "hex_base64")]
+impl From<base64::DecodeError> for Error {
+  fn from(e: base64::DecodeError) -> Self {
+    Self::Base64(e)
+  }
 }
 
 /// Convenience alias for `core::result::Result<T, Error>`.

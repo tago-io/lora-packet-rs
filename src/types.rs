@@ -230,6 +230,30 @@ macro_rules! id_newtype {
         &self.0
       }
     }
+
+    #[cfg(feature = "hex_base64")]
+    impl $name {
+      /// Construct from a hex string.
+      ///
+      /// # Errors
+      /// [`Error::Hex`] if the input is not valid hex.
+      /// [`Error::InvalidIdentifierLength`] if the decoded byte length is wrong.
+      pub fn from_hex(s: &str) -> Result<Self> {
+        let bytes = hex::decode(s)?;
+        Self::from_slice(&bytes)
+      }
+
+      /// Construct from a standard base64 string.
+      ///
+      /// # Errors
+      /// [`Error::Base64`] if the input is not valid base64.
+      /// [`Error::InvalidIdentifierLength`] if the decoded byte length is wrong.
+      pub fn from_base64(s: &str) -> Result<Self> {
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(s)?;
+        Self::from_slice(&bytes)
+      }
+    }
   };
 }
 
@@ -299,6 +323,30 @@ macro_rules! key_newtype {
     impl core::fmt::Debug for $name {
       fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, concat!(stringify!($name), "(***)"))
+      }
+    }
+
+    #[cfg(feature = "hex_base64")]
+    impl $name {
+      /// Construct from a hex string (32 hex chars for 16 bytes).
+      ///
+      /// # Errors
+      /// [`Error::Hex`] if the input is not valid hex.
+      /// [`Error::InvalidKeyLength`] if the decoded byte length is not 16.
+      pub fn from_hex(s: &str) -> Result<Self> {
+        let bytes = hex::decode(s)?;
+        Self::from_slice(&bytes)
+      }
+
+      /// Construct from a standard base64 string.
+      ///
+      /// # Errors
+      /// [`Error::Base64`] if the input is not valid base64.
+      /// [`Error::InvalidKeyLength`] if the decoded byte length is not 16.
+      pub fn from_base64(s: &str) -> Result<Self> {
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(s)?;
+        Self::from_slice(&bytes)
       }
     }
 
