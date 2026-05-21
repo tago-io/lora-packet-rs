@@ -1,8 +1,8 @@
 [package]
 name = "lora-packet"
-version = "1.0.2"
+version = "1.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 description = "LoRaWAN 1.0/1.1 packet decoder and encoder with parse, build, MIC, and key derivation."
 repository = "https://github.com/tago-io/lora-packet-rs"
 homepage = "https://github.com/tago-io/lora-packet-rs"
