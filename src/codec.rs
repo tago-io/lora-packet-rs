@@ -827,6 +827,26 @@ impl LoraPacketBuilder {
     self
   }
 
+  /// Build a Join Accept, compute the MIC, and produce the encrypted wire bytes.
+  ///
+  /// Returns `(plaintext_packet, encrypted_wire)`. The plaintext packet has
+  /// MIC populated and `phy_payload` set to the plaintext form. The wire
+  /// bytes are what you send over the air; the device will decrypt them back
+  /// to the plaintext form.
+  ///
+  /// # Errors
+  /// `Error::Other` if required Join Accept fields are missing.
+  pub fn sign_join_accept(self, app_key: &crate::types::AppKey) -> crate::Result<(LoraPacket, alloc::vec::Vec<u8>)> {
+    let mut packet = self.build_unsigned()?;
+    let keys = crate::mic::V1_0MicKeys {
+      app_key: Some(app_key),
+      ..Default::default()
+    };
+    packet.recalculate_mic_v1_0(&keys)?;
+    let encrypted_wire = JoinAccept::encrypt_for_wire(&packet.phy_payload, app_key)?;
+    Ok((packet, encrypted_wire))
+  }
+
   /// Build a Join Request and compute its MIC (works for both 1.0 and 1.1;
   /// the caller passes the appropriate key as `AppKey` for 1.0 or as a `NwkKey`
   /// cast through `AppKey::new` for 1.1, since the algorithm is identical).
@@ -1375,6 +1395,28 @@ mod tests {
       &packet.phy_payload[packet.phy_payload.len() - 4..],
       &[0x2b, 0x11, 0xff, 0x0d]
     );
+  }
+
+  #[test]
+  fn sign_join_accept_zero_key_vector() {
+    use crate::types::{AppKey, AppNonce, NetId};
+
+    let app_key = AppKey::new([0u8; 16]);
+    let (packet, encrypted_wire) = LoraPacket::builder()
+      .join_accept()
+      .join_nonce(AppNonce::new([0, 0, 0]))
+      .net_id(NetId::new([0, 0, 0]))
+      .dev_addr(DevAddr::new([0, 0, 0, 0]))
+      .dl_settings(DlSettings(0))
+      .rx_delay(0)
+      .sign_join_accept(&app_key)
+      .unwrap();
+
+    // Plaintext MIC should be f86f0a91
+    assert_eq!(packet.mic, [0xf8, 0x6f, 0x0a, 0x91]);
+    // Encrypted wire should match the TS join_accept_encrypt vector
+    let expected_encrypted = hex_to_vec("20e3de108795f776b8037610ef7869b5b3");
+    assert_eq!(encrypted_wire, expected_encrypted);
   }
 
   #[test]
