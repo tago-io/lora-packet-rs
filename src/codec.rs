@@ -827,6 +827,22 @@ impl LoraPacketBuilder {
     self
   }
 
+  /// Build a Join Request and compute its MIC (works for both 1.0 and 1.1;
+  /// the caller passes the appropriate key as `AppKey` for 1.0 or as a `NwkKey`
+  /// cast through `AppKey::new` for 1.1, since the algorithm is identical).
+  ///
+  /// # Errors
+  /// `Error::Other` if required fields are missing.
+  pub fn sign_join_request(self, app_key: &crate::types::AppKey) -> crate::Result<LoraPacket> {
+    let mut packet = self.build_unsigned()?;
+    let keys = crate::mic::V1_0MicKeys {
+      app_key: Some(app_key),
+      ..Default::default()
+    };
+    packet.recalculate_mic_v1_0(&keys)?;
+    Ok(packet)
+  }
+
   /// Build a Data packet, encrypt `FRMPayload`, and compute MIC.
   ///
   /// The plaintext payload provided via `.payload(...)` is encrypted with
@@ -1359,6 +1375,27 @@ mod tests {
       &packet.phy_payload[packet.phy_payload.len() - 4..],
       &[0x2b, 0x11, 0xff, 0x0d]
     );
+  }
+
+  #[test]
+  fn sign_join_request_produces_verifiable_mic() {
+    use crate::mic::V1_0MicKeys;
+    use crate::types::AppKey;
+
+    let app_key = AppKey::new([0u8; 16]);
+    let packet = LoraPacket::builder()
+      .join_request()
+      .join_eui(AppEui::new([0u8; 8]))
+      .dev_eui(DevEui::new([0u8; 8]))
+      .dev_nonce(DevNonce::new([0u8; 2]))
+      .sign_join_request(&app_key)
+      .unwrap();
+
+    let keys = V1_0MicKeys {
+      app_key: Some(&app_key),
+      ..Default::default()
+    };
+    assert!(packet.verify_mic_v1_0(&keys).unwrap());
   }
 
   #[test]
