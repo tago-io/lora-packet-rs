@@ -1257,11 +1257,18 @@ impl LoraPacketBuilder {
         if f_opts_len > 15 {
           return Err(crate::Error::FOptsTooLong(self.f_opts.len()));
         }
+        // FCtrl.FOptsLen (low nibble) must match the actual FOpts length.
+        // If the caller supplied a custom FCtrl, keep its upper nibble (ADR,
+        // ADRACKReq, ACK, FPending) but force the low nibble to f_opts_len.
+        let f_opts_len_nibble = f_opts_len & 0x0F;
+        let f_ctrl = self
+          .f_ctrl
+          .map_or(FCtrl(f_opts_len_nibble), |fc| FCtrl((fc.0 & 0xF0) | f_opts_len_nibble));
         Payload::Data(Data {
           direction,
           confirmed: self.confirmed,
           dev_addr: self.dev_addr.ok_or(crate::Error::MissingField("dev_addr"))?,
-          f_ctrl: self.f_ctrl.unwrap_or(FCtrl(f_opts_len & 0x0f)),
+          f_ctrl,
           f_cnt: self.f_cnt.unwrap_or(0).to_le_bytes(),
           f_opts: self.f_opts,
           f_port: self.f_port,
@@ -1772,6 +1779,23 @@ mod tests {
       .f_opts(&too_many)
       .build_unsigned();
     assert!(matches!(result, Err(crate::Error::FOptsTooLong(16))));
+  }
+
+  #[test]
+  fn builder_overrides_f_ctrl_low_nibble_with_actual_fopts_len() {
+    // Caller passes a FCtrl whose low nibble (0) disagrees with the actual
+    // f_opts vector length (3). The builder must preserve the upper nibble
+    // (0xA = ADR + ACK bits) and rewrite the low nibble to 3.
+    let packet = LoraPacket::builder()
+      .data(Direction::Uplink, false)
+      .dev_addr(DevAddr::new([1, 2, 3, 4]))
+      .f_ctrl(FCtrl(0xA0))
+      .f_opts(&[0x01, 0x02, 0x03])
+      .build_unsigned()
+      .unwrap();
+    let data = packet.as_data().unwrap();
+    assert_eq!(data.f_ctrl.as_byte(), 0xA3, "upper nibble preserved, low nibble = 3");
+    assert_eq!(data.f_opts.len(), 3);
   }
 
   #[test]
