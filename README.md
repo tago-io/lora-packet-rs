@@ -20,20 +20,22 @@ Parse and build PHYPayload frames, AES-ECB FRMPayload + FOpts crypt, AES-CMAC MI
 ```rust
 use lora_packet::{LoraPacket, AppSKey, NwkSKey, V1_0MicKeys};
 
-let bytes = hex::decode("40f17dbe4900020001954378762b11ff0d")?;
-let packet = LoraPacket::from_wire(&bytes)?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let bytes = hex::decode("40f17dbe4900020001954378762b11ff0d")?;
+  let packet = LoraPacket::from_wire(&bytes)?;
 
-let nwk_s_key = NwkSKey::from_slice(&hex::decode("44024241ed4ce9a68c6a8bc055233fd3")?)?;
-let app_s_key = AppSKey::from_slice(&hex::decode("ec925802ae430ca77fd3dd73cb2cc588")?)?;
+  let nwk_s_key = NwkSKey::from_slice(&hex::decode("44024241ed4ce9a68c6a8bc055233fd3")?)?;
+  let app_s_key = AppSKey::from_slice(&hex::decode("ec925802ae430ca77fd3dd73cb2cc588")?)?;
 
-let keys = V1_0MicKeys { nwk_s_key: Some(&nwk_s_key), ..Default::default() };
-if packet.verify_mic_v1_0(&keys)? {
-  if let Some(data) = packet.as_data() {
-    let plaintext = data.decrypt_payload(&app_s_key, &nwk_s_key, 0)?;
-    println!("payload: {plaintext:?}");
+  let keys = V1_0MicKeys { nwk_s_key: Some(&nwk_s_key), ..Default::default() };
+  if packet.verify_mic_v1_0(&keys)? {
+    if let Some(data) = packet.as_data() {
+      let plaintext = data.decrypt_payload(&app_s_key, &nwk_s_key, 0)?;
+      println!("payload: {plaintext:?}");
+    }
   }
+  Ok(())
 }
-# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ## Build a downlink
@@ -41,19 +43,22 @@ if packet.verify_mic_v1_0(&keys)? {
 ```rust
 use lora_packet::{LoraPacket, Direction, DevAddr, AppSKey, NwkSKey};
 
-let app_s_key = AppSKey::new([0u8; 16]);
-let nwk_s_key = NwkSKey::new([0u8; 16]);
+fn main() -> Result<(), lora_packet::Error> {
+  let app_s_key = AppSKey::new([0u8; 16]);
+  let nwk_s_key = NwkSKey::new([0u8; 16]);
 
-let packet = LoraPacket::builder()
-  .data(Direction::Downlink, false)
-  .dev_addr(DevAddr::new([0x49, 0xbe, 0x7d, 0xf1]))
-  .f_cnt(2)
-  .f_port(1)
-  .payload(b"hello")
-  .sign_and_encrypt(&app_s_key, &nwk_s_key)?;
+  let packet = LoraPacket::builder()
+    .data(Direction::Downlink, false)
+    .dev_addr(DevAddr::new([0x49, 0xbe, 0x7d, 0xf1]))
+    .f_cnt(2)
+    .f_port(1)
+    .payload(b"hello")
+    .sign_and_encrypt(&app_s_key, &nwk_s_key)?;
 
-let wire: Vec<u8> = packet.to_wire();
-# Ok::<(), lora_packet::Error>(())
+  let wire: Vec<u8> = packet.to_wire();
+  let _ = wire;
+  Ok(())
+}
 ```
 
 ## OTAA session keys
@@ -77,17 +82,19 @@ let keys_11 = SessionKeys11::derive(&app_key, &nwk_key, &join_eui, &app_nonce, &
 ```rust
 use lora_packet::{LoraPacket, Payload, RejoinRequest};
 
-let wire = hex::decode("c0000102030405060708090a0b0c0ddeadbeef")?;
-let packet = LoraPacket::from_wire(&wire)?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let wire = hex::decode("c0000102030405060708090a0b0c0ddeadbeef")?;
+  let packet = LoraPacket::from_wire(&wire)?;
 
-if let Payload::RejoinRequest(rj) = &packet.payload {
-  match rj {
-    RejoinRequest::Type0 { net_id, dev_eui, rj_count_0 } => { let _ = (net_id, dev_eui, rj_count_0); }
-    RejoinRequest::Type1 { join_eui, dev_eui, rj_count_1 } => { let _ = (join_eui, dev_eui, rj_count_1); }
-    RejoinRequest::Type2 { net_id, dev_eui, rj_count_0 } => { let _ = (net_id, dev_eui, rj_count_0); }
+  if let Payload::RejoinRequest(rj) = &packet.payload {
+    match rj {
+      RejoinRequest::Type0 { net_id, dev_eui, rj_count_0 } => { let _ = (net_id, dev_eui, rj_count_0); }
+      RejoinRequest::Type1 { join_eui, dev_eui, rj_count_1 } => { let _ = (join_eui, dev_eui, rj_count_1); }
+      RejoinRequest::Type2 { net_id, dev_eui, rj_count_0 } => { let _ = (net_id, dev_eui, rj_count_0); }
+    }
   }
+  Ok(())
 }
-# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ## Features

@@ -352,8 +352,10 @@ impl LoraPacket {
   /// computed MIC and the received MIC for debugging.
   ///
   /// # Errors
-  /// [`crate::Error::MissingKey`] if a required key for the message type is
-  /// not in `keys`.
+  /// - [`crate::Error::MissingKey`] if a required key for the message type
+  ///   is not in `keys`.
+  /// - [`crate::Error::UnsupportedForVersion`] if the payload is a Rejoin
+  ///   Request or Proprietary frame (both 1.1-only).
   pub fn calculate_mic_v1_0(&self, keys: &crate::mic::V1_0MicKeys<'_>) -> crate::Result<[u8; 4]> {
     match &self.payload {
       Payload::Data(_) => {
@@ -375,9 +377,9 @@ impl LoraPacket {
         let mhdr_and_body = &self.phy_payload[..self.phy_payload.len() - 4];
         Ok(crate::mic::calculate_join_accept_mic_1_0(mhdr_and_body, key.as_bytes()))
       }
-      Payload::RejoinRequest(_) | Payload::Proprietary(_) => {
-        Err(crate::Error::MissingKey("use verify_mic_v1_1 for rejoin/proprietary"))
-      }
+      Payload::RejoinRequest(_) | Payload::Proprietary(_) => Err(crate::Error::UnsupportedForVersion(
+        "Rejoin Request and Proprietary frames are 1.1-only; use calculate_mic_v1_1",
+      )),
     }
   }
 
@@ -921,6 +923,8 @@ pub struct LoraPacketBuilder {
   cf_list: Option<[u8; 16]>,
   join_req_type: Option<u8>,
   rejoin_type: Option<u8>,
+  rj_count_0: Option<[u8; 2]>,
+  rj_count_1: Option<[u8; 2]>,
 }
 
 impl LoraPacket {
@@ -1111,6 +1115,24 @@ impl LoraPacketBuilder {
     self
   }
 
+  /// Set `RJcount0` (Rejoin Request Type 0 and Type 2).
+  ///
+  /// Stored little-endian on the wire. Defaults to 0 when not set.
+  #[must_use]
+  pub const fn rj_count_0(mut self, count: u16) -> Self {
+    self.rj_count_0 = Some(count.to_le_bytes());
+    self
+  }
+
+  /// Set `RJcount1` (Rejoin Request Type 1).
+  ///
+  /// Stored little-endian on the wire. Defaults to 0 when not set.
+  #[must_use]
+  pub const fn rj_count_1(mut self, count: u16) -> Self {
+    self.rj_count_1 = Some(count.to_le_bytes());
+    self
+  }
+
   /// Build a Join Accept, compute the MIC, and produce the encrypted wire bytes.
   ///
   /// Returns `(plaintext_packet, encrypted_wire)`. The plaintext packet has
@@ -1289,17 +1311,17 @@ impl LoraPacketBuilder {
           0 => RejoinRequest::Type0 {
             net_id: self.net_id.ok_or(crate::Error::MissingField("net_id"))?,
             dev_eui,
-            rj_count_0: [0, 0],
+            rj_count_0: self.rj_count_0.unwrap_or([0, 0]),
           },
           1 => RejoinRequest::Type1 {
             join_eui: self.join_eui.ok_or(crate::Error::MissingField("join_eui"))?,
             dev_eui,
-            rj_count_1: [0, 0],
+            rj_count_1: self.rj_count_1.unwrap_or([0, 0]),
           },
           2 => RejoinRequest::Type2 {
             net_id: self.net_id.ok_or(crate::Error::MissingField("net_id"))?,
             dev_eui,
-            rj_count_0: [0, 0],
+            rj_count_0: self.rj_count_0.unwrap_or([0, 0]),
           },
           other => return Err(crate::Error::InvalidRejoinType(other)),
         })
@@ -1807,6 +1829,76 @@ mod tests {
     bytes[0] = 0b1110_0000; // Proprietary MType
     let result = LoraPacket::from_wire(&bytes);
     assert!(result.is_ok(), "256-byte buffer should parse, got {result:?}");
+  }
+
+  #[test]
+  fn builder_rj_count_0_persists_through_rejoin_type_0() {
+    use crate::types::NetId;
+    let packet = LoraPacket::builder()
+      .rejoin_request(0)
+      .net_id(NetId::new([0, 0, 0]))
+      .dev_eui(DevEui::new([0; 8]))
+      .rj_count_0(0x1234)
+      .build_unsigned()
+      .unwrap();
+    match &packet.payload {
+      Payload::RejoinRequest(RejoinRequest::Type0 { rj_count_0, .. }) => {
+        assert_eq!(rj_count_0, &0x1234u16.to_le_bytes());
+      }
+      other => panic!("expected Rejoin Type 0, got {other:?}"),
+    }
+  }
+
+  #[test]
+  fn builder_rj_count_1_persists_through_rejoin_type_1() {
+    let packet = LoraPacket::builder()
+      .rejoin_request(1)
+      .join_eui(AppEui::new([0; 8]))
+      .dev_eui(DevEui::new([0; 8]))
+      .rj_count_1(0xBEEF)
+      .build_unsigned()
+      .unwrap();
+    match &packet.payload {
+      Payload::RejoinRequest(RejoinRequest::Type1 { rj_count_1, .. }) => {
+        assert_eq!(rj_count_1, &0xBEEFu16.to_le_bytes());
+      }
+      other => panic!("expected Rejoin Type 1, got {other:?}"),
+    }
+  }
+
+  #[test]
+  fn builder_rj_count_0_persists_through_rejoin_type_2() {
+    use crate::types::NetId;
+    let packet = LoraPacket::builder()
+      .rejoin_request(2)
+      .net_id(NetId::new([0, 0, 0]))
+      .dev_eui(DevEui::new([0; 8]))
+      .rj_count_0(0x00DB)
+      .build_unsigned()
+      .unwrap();
+    match &packet.payload {
+      Payload::RejoinRequest(RejoinRequest::Type2 { rj_count_0, .. }) => {
+        assert_eq!(rj_count_0, &0x00DBu16.to_le_bytes());
+      }
+      other => panic!("expected Rejoin Type 2, got {other:?}"),
+    }
+  }
+
+  #[test]
+  fn builder_rejoin_defaults_to_zero_counters() {
+    use crate::types::NetId;
+    let packet = LoraPacket::builder()
+      .rejoin_request(0)
+      .net_id(NetId::new([0, 0, 0]))
+      .dev_eui(DevEui::new([0; 8]))
+      .build_unsigned()
+      .unwrap();
+    match &packet.payload {
+      Payload::RejoinRequest(RejoinRequest::Type0 { rj_count_0, .. }) => {
+        assert_eq!(rj_count_0, &[0, 0]);
+      }
+      other => panic!("expected Rejoin Type 0, got {other:?}"),
+    }
   }
 
   #[test]

@@ -17,7 +17,8 @@ use alloc::string::String;
 /// 2. **Construction** ([`Error::InvalidKeyLength`],
 ///    [`Error::InvalidIdentifierLength`], [`Error::MissingField`],
 ///    [`Error::PayloadTooLarge`]).
-/// 3. **Crypto / MIC** ([`Error::MicMismatch`], [`Error::MissingKey`]).
+/// 3. **Crypto / MIC** ([`Error::MicMismatch`], [`Error::MissingKey`],
+///    [`Error::UnsupportedForVersion`]).
 ///
 /// The `Other`, `Hex`, and `Base64` variants exist for boundary conversions
 /// and should not need to be matched in normal code paths.
@@ -114,6 +115,14 @@ pub enum Error {
   /// for Data MIC"`).
   #[error("missing key for operation: {0}")]
   MissingKey(&'static str),
+
+  /// An API call was made on a message type the chosen `LoRaWAN` version does
+  /// not support.
+  ///
+  /// Example: `calculate_mic_v1_0` called on a Rejoin Request or Proprietary
+  /// frame (both 1.1-only). The string names which API to call instead.
+  #[error("operation not supported for this message type in this LoRaWAN version: {0}")]
+  UnsupportedForVersion(&'static str),
 
   /// Builder finalisation failed because a required field was not set.
   ///

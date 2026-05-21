@@ -521,8 +521,9 @@ fn builder_fopts_exactly_15_bytes_accepted() {
 }
 
 #[test]
-fn calculate_mic_v1_0_rejoin_returns_missing_key() {
-  // The 1.0 surface does not handle Rejoin; should surface MissingKey-style error.
+fn calculate_mic_v1_0_rejoin_returns_unsupported_for_version() {
+  // The 1.0 surface does not handle Rejoin; surface a typed error pointing
+  // the caller at the 1.1 API.
   let bytes = hex_to_vec("c0000102030405060708090a0b0c0ddeadbeef");
   let packet = LoraPacket::from_wire(&bytes).unwrap();
   let app_key = AppKey::new([0u8; 16]);
@@ -531,7 +532,20 @@ fn calculate_mic_v1_0_rejoin_returns_missing_key() {
     ..Default::default()
   };
   let err = packet.calculate_mic_v1_0(&keys).unwrap_err();
-  assert!(matches!(err, Error::MissingKey(_)));
+  assert!(matches!(err, Error::UnsupportedForVersion(_)), "got {err:?}");
+}
+
+#[test]
+fn calculate_mic_v1_0_proprietary_returns_unsupported_for_version() {
+  let bytes = hex_to_vec("e0deadbeefcafe11223344");
+  let packet = LoraPacket::from_wire(&bytes).unwrap();
+  let app_key = AppKey::new([0u8; 16]);
+  let keys = V1_0MicKeys {
+    app_key: Some(&app_key),
+    ..Default::default()
+  };
+  let err = packet.calculate_mic_v1_0(&keys).unwrap_err();
+  assert!(matches!(err, Error::UnsupportedForVersion(_)), "got {err:?}");
 }
 
 #[test]
