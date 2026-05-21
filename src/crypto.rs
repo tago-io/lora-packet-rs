@@ -36,6 +36,21 @@ pub struct SessionKeys10 {
 
 impl SessionKeys10 {
   /// Derive `AppSKey` and `NwkSKey` from the OTAA root key and join nonces.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lora_packet::{SessionKeys10, AppKey, NetId, AppNonce, DevNonce};
+  ///
+  /// let app_key = AppKey::new([0u8; 16]);
+  /// let keys = SessionKeys10::derive(
+  ///   &app_key,
+  ///   &NetId::new([0, 0, 0]),
+  ///   &AppNonce::new([0, 0, 0]),
+  ///   &DevNonce::new([0, 0]),
+  /// );
+  /// assert_ne!(keys.app_s_key.as_bytes(), keys.nwk_s_key.as_bytes());
+  /// ```
   // All key-derivation helpers take inputs by reference for a uniform public API
   // even though the small identifier types are `Copy`.
   #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -83,6 +98,21 @@ pub struct SessionKeys11 {
 
 impl SessionKeys11 {
   /// Derive all four 1.1 session keys.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lora_packet::{SessionKeys11, AppKey, NwkKey, AppEui, AppNonce, DevNonce};
+  ///
+  /// let keys = SessionKeys11::derive(
+  ///   &AppKey::new([0u8; 16]),
+  ///   &NwkKey::new([0u8; 16]),
+  ///   &AppEui::new([0u8; 8]),
+  ///   &AppNonce::new([0, 0, 0]),
+  ///   &DevNonce::new([0, 0]),
+  /// );
+  /// assert_ne!(keys.app_s_key.as_bytes(), keys.f_nwk_s_int_key.as_bytes());
+  /// ```
   #[allow(clippy::trivially_copy_pass_by_ref)]
   pub fn derive(
     app_key: &AppKey,
@@ -221,6 +251,19 @@ impl crate::codec::Data {
   ///
   /// # Errors
   /// Currently infallible (returns `Result` for forward compatibility).
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lora_packet::{LoraPacket, AppSKey, NwkSKey};
+  ///
+  /// let bytes = hex::decode("40f17dbe4900020001954378762b11ff0d").unwrap();
+  /// let packet = LoraPacket::from_wire(&bytes).unwrap();
+  /// let app_s_key = AppSKey::from_slice(&hex::decode("ec925802ae430ca77fd3dd73cb2cc588").unwrap()).unwrap();
+  /// let nwk_s_key = NwkSKey::from_slice(&hex::decode("44024241ed4ce9a68c6a8bc055233fd3").unwrap()).unwrap();
+  /// let plain = packet.as_data().unwrap().decrypt_payload(&app_s_key, &nwk_s_key, 0).unwrap();
+  /// assert_eq!(&plain, b"test");
+  /// ```
   pub fn decrypt_payload(
     &self,
     app_s_key: &AppSKey,

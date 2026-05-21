@@ -382,6 +382,16 @@ impl LoraPacket {
   /// - `Error::TooShort` if the buffer is shorter than the minimum 5 bytes (MHDR + MIC).
   /// - `Error::InvalidMType` if the MHDR encodes an unknown `MType`.
   /// - `Error::InvalidRejoinType` if a Rejoin Request has type byte not in {0, 1, 2}.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lora_packet::LoraPacket;
+  ///
+  /// let bytes = hex::decode("40f17dbe4900020001954378762b11ff0d").unwrap();
+  /// let packet = LoraPacket::from_wire(&bytes).unwrap();
+  /// assert!(packet.is_data());
+  /// ```
   pub fn from_wire(bytes: &[u8]) -> crate::Result<Self> {
     if bytes.len() < 5 {
       return Err(crate::Error::TooShort {
@@ -710,6 +720,24 @@ pub struct LoraPacketBuilder {
 
 impl LoraPacket {
   /// Begin building a packet field by field.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lora_packet::{LoraPacket, Direction, DevAddr, AppSKey, NwkSKey};
+  ///
+  /// let app_s_key = AppSKey::new([0u8; 16]);
+  /// let nwk_s_key = NwkSKey::new([0u8; 16]);
+  /// let packet = LoraPacket::builder()
+  ///   .data(Direction::Uplink, false)
+  ///   .dev_addr(DevAddr::new([0x49, 0xbe, 0x7d, 0xf1]))
+  ///   .f_cnt(2)
+  ///   .f_port(1)
+  ///   .payload(b"hi")
+  ///   .sign_and_encrypt(&app_s_key, &nwk_s_key)
+  ///   .unwrap();
+  /// assert!(packet.is_data());
+  /// ```
   pub fn builder() -> LoraPacketBuilder {
     LoraPacketBuilder::default()
   }
