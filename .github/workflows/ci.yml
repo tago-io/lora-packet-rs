@@ -46,3 +46,15 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
       - run: cargo test --all-features
       - run: cargo test --no-default-features
+
+  test-each-feature:
+    name: test (${{ matrix.feature }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature: [serde, hex_base64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --no-default-features --features ${{ matrix.feature }}
