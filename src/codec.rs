@@ -131,7 +131,11 @@ impl LoraPacket {
   /// Message type from the MHDR.
   ///
   /// # Panics
-  /// Never panics on a packet produced by `from_wire` (parser rejects invalid `MType`).
+  /// Never panics on a `LoraPacket` produced by [`from_wire`](Self::from_wire)
+  /// or the builder; both reject invalid `MType` bytes up front. When a
+  /// `LoraPacket` is struct-constructed directly with an invalid `Mhdr` byte,
+  /// this method will panic. Prefer construction via `from_wire` or
+  /// `builder()`.
   pub fn m_type(&self) -> MType {
     self.mhdr.m_type().expect("LoraPacket MHDR always has a valid MType")
   }
@@ -212,7 +216,7 @@ impl LoraPacket {
   /// `Error::MissingKey` if a required key for the message type is not in `keys`.
   pub fn verify_mic_v1_0(&self, keys: &crate::mic::V1_0MicKeys<'_>) -> crate::Result<bool> {
     let calculated = self.calculate_mic_v1_0(keys)?;
-    Ok(crate::mic::mic_eq_pub(calculated, self.mic))
+    Ok(crate::mic::mic_eq(calculated, self.mic))
   }
 
   /// Verify the MIC using the `LoRaWAN` 1.1 key set.
@@ -221,7 +225,7 @@ impl LoraPacket {
   /// `Error::MissingKey` if a required key for the message type is not in `keys`.
   pub fn verify_mic_v1_1(&self, keys: &crate::mic::V1_1MicKeys<'_>) -> crate::Result<bool> {
     let calculated = self.calculate_mic_v1_1(keys)?;
-    Ok(crate::mic::mic_eq_pub(calculated, self.mic))
+    Ok(crate::mic::mic_eq(calculated, self.mic))
   }
 
   /// Calculate the MIC under `LoRaWAN` 1.0.
@@ -922,6 +926,22 @@ impl LoraPacketBuilder {
     Ok(packet)
   }
 
+  /// Build a Join Request and compute its MIC using `LoRaWAN` 1.1 `NwkKey`.
+  ///
+  /// The CMAC algorithm is identical to 1.0; only the key changes.
+  ///
+  /// # Errors
+  /// `Error::MissingField` if required fields are missing.
+  pub fn sign_join_request_v1_1(self, nwk_key: &crate::types::NwkKey) -> crate::Result<LoraPacket> {
+    let mut packet = self.build_unsigned()?;
+    let keys = crate::mic::V1_1MicKeys {
+      nwk_key: Some(nwk_key),
+      ..Default::default()
+    };
+    packet.recalculate_mic_v1_1(&keys)?;
+    Ok(packet)
+  }
+
   /// Build a Data packet, encrypt `FRMPayload`, and compute MIC.
   ///
   /// The plaintext payload provided via `.payload(...)` is encrypted with
@@ -1473,6 +1493,25 @@ mod tests {
       ..Default::default()
     };
     assert!(packet.verify_mic_v1_0(&keys).unwrap());
+  }
+
+  #[test]
+  fn sign_join_request_v1_1_works() {
+    use crate::mic::V1_1MicKeys;
+    use crate::types::NwkKey;
+    let nwk_key = NwkKey::new([0u8; 16]);
+    let packet = LoraPacket::builder()
+      .join_request()
+      .join_eui(AppEui::new([0; 8]))
+      .dev_eui(DevEui::new([0; 8]))
+      .dev_nonce(DevNonce::new([0; 2]))
+      .sign_join_request_v1_1(&nwk_key)
+      .unwrap();
+    let keys = V1_1MicKeys {
+      nwk_key: Some(&nwk_key),
+      ..Default::default()
+    };
+    assert!(packet.verify_mic_v1_1(&keys).unwrap());
   }
 
   #[test]

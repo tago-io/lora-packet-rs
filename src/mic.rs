@@ -55,11 +55,6 @@ pub(crate) fn mic_eq(a: [u8; 4], b: [u8; 4]) -> bool {
   a.ct_eq(&b).into()
 }
 
-/// Public-within-crate constant-time MIC compare for use by codec dispatchers.
-pub(crate) fn mic_eq_pub(a: [u8; 4], b: [u8; 4]) -> bool {
-  mic_eq(a, b)
-}
-
 /// Compute the Join Request MIC.
 ///
 /// Same algorithm for `LoRaWAN` 1.0 and 1.1; only the key differs (`AppKey`
@@ -87,7 +82,8 @@ pub(crate) fn calculate_join_accept_mic_1_0(mhdr_and_body: &[u8], key: &[u8; 16]
 /// carries only the low 16 bits).
 pub(crate) fn calculate_data_mic_1_0(packet: &crate::codec::LoraPacket, key: &[u8; 16], f_cnt_msb: u16) -> [u8; 4] {
   let crate::codec::Payload::Data(data) = &packet.payload else {
-    unreachable!("calculate_data_mic_1_0 called on non-data packet");
+    debug_assert!(false, "calculate_data_mic_1_0 called on non-data packet");
+    return [0u8; 4]; // safe fallback in release builds
   };
 
   let mhdr_and_body = &packet.phy_payload[..packet.phy_payload.len() - 4];
@@ -126,7 +122,8 @@ pub(crate) fn calculate_data_mic_1_1_uplink(
   conf_fcnt_down_tx_dr_tx_ch: [u8; 4],
 ) -> [u8; 4] {
   let crate::codec::Payload::Data(data) = &packet.payload else {
-    unreachable!("calculate_data_mic_1_1_uplink called on non-data packet");
+    debug_assert!(false, "calculate_data_mic_1_1_uplink called on non-data packet");
+    return [0u8; 4]; // safe fallback in release builds
   };
 
   let mhdr_and_body = &packet.phy_payload[..packet.phy_payload.len() - 4];
@@ -184,7 +181,8 @@ pub(crate) fn calculate_data_mic_1_1_downlink(
   conf_fcnt_down_tx_dr_tx_ch: [u8; 4],
 ) -> [u8; 4] {
   let crate::codec::Payload::Data(data) = &packet.payload else {
-    unreachable!("calculate_data_mic_1_1_downlink called on non-data packet");
+    debug_assert!(false, "calculate_data_mic_1_1_downlink called on non-data packet");
+    return [0u8; 4]; // safe fallback in release builds
   };
 
   let mhdr_and_body = &packet.phy_payload[..packet.phy_payload.len() - 4];
