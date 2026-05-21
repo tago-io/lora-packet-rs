@@ -294,32 +294,95 @@ the matching Rust file in the same PR.
 
 ## Releasing a new version
 
+**AI agents drive the entire release end to end.** When the user asks
+for a new version (or asks you to ship a bug fix, etc.), you handle the
+version bump, the release notes, and the publish. Do not hand the
+release back to the user unless trusted publishing is unconfigured or a
+secret is missing.
+
 GitHub releases are the source of truth for changelogs. Do **not** push
 tags manually - always create a release through GitHub. The release
 publish event triggers `.github/workflows/publish-crate.yml`, which
 authenticates with crates.io via OIDC trusted publishing and runs
 `cargo publish`.
 
-Procedure:
+### Agent procedure
 
-1. Bump `version` in `Cargo.toml` (follow semver: patch for bug fixes,
-   minor for backwards-compatible features, major for breaking changes).
-2. Commit on `main`: `chore(crate): bump version to X.Y.Z`.
-3. Push and wait for CI to be green.
-4. Go to https://github.com/tago-io/lora-packet-rs/releases/new
-   - **Tag**: `vX.Y.Z` (the workflow rejects mismatches with `Cargo.toml`)
-   - **Title**: `vX.Y.Z`
-   - **Body**: changelog as markdown bullets (`### Added`, `### Fixed`,
-     `### Changed`, `### Breaking`, `### Internal` as needed)
-   - Click **Publish release**.
-5. Watch the `Publish Crate` workflow at
-   https://github.com/tago-io/lora-packet-rs/actions/workflows/publish-crate.yml.
-   On success, the new version is live at
-   https://crates.io/crates/lora-packet.
+```bash
+# 1. Confirm main is clean and decide the new version.
+git status
+git log "v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)..HEAD" --oneline
+# Pick patch / minor / major per semver based on the commits since the
+# last tag.
 
-If the publish fails, fix the cause, then re-run the workflow from the
-Actions UI (`Re-run all jobs`) - do not delete and recreate the release
-unless the tag itself is wrong.
+# 2. Bump Cargo.toml version. Use Edit, not sed-in-place, so the change
+# is auditable.
+# version = "X.Y.Z"
+
+# 3. Commit and push.
+git add Cargo.toml
+git commit -m "chore(crate): bump version to X.Y.Z"
+git push origin main
+
+# 4. Wait for CI to go green before releasing.
+gh run watch --exit-status
+
+# 5. Draft release notes from the commit log. Group by:
+#   ### Added       - new public functionality
+#   ### Changed     - behavior changes that are not breaking
+#   ### Fixed       - bug fixes
+#   ### Breaking    - public API changes that require a major bump
+#   ### Internal    - tooling, refactors, docs that users won't notice
+# Be terse. One bullet per change. Drop trivial commits (typos,
+# formatting). Write in past tense ("Added X", not "Adds X").
+
+# 6. Create the GitHub release. This triggers the publish workflow.
+gh release create vX.Y.Z \
+  --title "vX.Y.Z" \
+  --target main \
+  --notes "$(cat <<'EOF'
+### Added
+- ...
+
+### Fixed
+- ...
+EOF
+)"
+
+# 7. Watch the publish workflow. Fail loudly if it fails.
+gh run watch --workflow=publish-crate.yml --exit-status
+
+# 8. Confirm the version is on crates.io.
+curl -s https://crates.io/api/v1/crates/lora-packet | \
+  python3 -c "import sys,json; print(json.load(sys.stdin)['crate']['max_stable_version'])"
+```
+
+### If the publish fails
+
+- **Verify step fails** (tag does not match Cargo.toml): the release was
+  created with the wrong tag. Delete + recreate the release with the
+  correct tag.
+- **Auth step fails**: crates.io trusted publishing is misconfigured.
+  This is the only case where you must stop and ask the user to fix the
+  crates.io repo settings.
+- **Publish step fails** (network, transient): re-run from
+  `gh run rerun --failed`.
+- **Workflow YAML had a bug** (e.g., the verify step needs a fix): the
+  re-run uses the workflow YAML from the original release commit and
+  will still fail. Fix the YAML, push, **then delete and recreate the
+  release** so the new release event picks up the fixed YAML.
+
+### Semver rules for this crate
+
+- `Error` variants are public API. Adding a variant is non-breaking
+  (a minor bump); removing or renaming one is breaking (major bump).
+- Key newtypes, the `Payload` enum variants, and the `LoraPacketBuilder`
+  method signatures are public API. Same rule.
+- Adding a feature flag is non-breaking. Removing or renaming one is
+  breaking.
+- Bumping a dependency's major version is breaking if the dep type
+  shows up in the public surface (none of ours currently do, so this is
+  usually a minor bump).
 
 ## Integration guide
 
