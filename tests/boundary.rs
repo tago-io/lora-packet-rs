@@ -182,8 +182,11 @@ fn frm_payload_one_byte() {
 }
 
 #[test]
-fn frm_payload_250_bytes_round_trips() {
-  let payload: Vec<u8> = (0..250).map(|i| i as u8).collect();
+fn frm_payload_239_bytes_round_trips() {
+  // 239 bytes is the largest FRMPayload that still fits the 256-byte PHY
+  // cap (256 - 1 MHDR - 7 FHDR - 1 FPort - 4 MIC = 243; we use 239 to be
+  // well clear). The cap exists to keep CMAC B0/B1 length bytes in range.
+  let payload: Vec<u8> = (0..239).map(|i| i as u8).collect();
   let pkt = LoraPacket::builder()
     .data(Direction::Uplink, false)
     .dev_addr(DevAddr::new([0; 4]))
@@ -193,7 +196,7 @@ fn frm_payload_250_bytes_round_trips() {
     .build_unsigned()
     .unwrap();
   let d = pkt.as_data().unwrap();
-  assert_eq!(d.frm_payload.as_deref().unwrap().len(), 250);
+  assert_eq!(d.frm_payload.as_deref().unwrap().len(), 239);
   let parsed = LoraPacket::from_wire(&pkt.phy_payload).unwrap();
   assert_eq!(parsed.as_data().unwrap().frm_payload.as_deref().unwrap(), &payload[..]);
 }

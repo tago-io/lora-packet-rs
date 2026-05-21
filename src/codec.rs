@@ -537,6 +537,8 @@ impl LoraPacket {
   /// # Errors
   /// - [`crate::Error::TooShort`] if the buffer is shorter than the minimum
   ///   5 bytes (MHDR + MIC), or shorter than the per-variant minimum.
+  /// - [`crate::Error::TooLong`] if the buffer exceeds the `LoRaWAN` PHY
+  ///   maximum of 256 bytes.
   /// - [`crate::Error::InvalidMType`] if the MHDR encodes an unknown
   ///   `MType` (reserved for forward compatibility).
   /// - [`crate::Error::InvalidRejoinType`] if a Rejoin Request type byte is
@@ -563,6 +565,12 @@ impl LoraPacket {
         expected: 5,
         got: bytes.len(),
       });
+    }
+    // LoRaWAN PHY payload never exceeds 256 bytes in any regional plan.
+    // Reject larger buffers so the 1-byte length field in CMAC B0/B1
+    // cannot silently wrap and produce a wrong-but-deterministic MIC.
+    if bytes.len() > 256 {
+      return Err(crate::Error::TooLong { got: bytes.len() });
     }
     let mhdr = Mhdr::new(bytes[0]);
     let mic_offset = bytes.len() - 4;
@@ -1779,6 +1787,26 @@ mod tests {
       .f_opts(&too_many)
       .build_unsigned();
     assert!(matches!(result, Err(crate::Error::FOptsTooLong(16))));
+  }
+
+  #[test]
+  fn from_wire_rejects_oversized_buffer() {
+    // 257 bytes exceeds the LoRaWAN PHY maximum of 256; reject before
+    // parsing so we cannot produce a wrong-but-deterministic MIC.
+    let huge = alloc::vec![0u8; 257];
+    let err = LoraPacket::from_wire(&huge).unwrap_err();
+    assert!(matches!(err, crate::Error::TooLong { got: 257 }));
+  }
+
+  #[test]
+  fn from_wire_accepts_max_size_buffer() {
+    // Boundary: exactly 256 bytes must still be accepted (or rejected on
+    // semantic grounds, but not on the length cap). We pick a Proprietary
+    // MType so the parser does not try to interpret the body.
+    let mut bytes = alloc::vec![0u8; 256];
+    bytes[0] = 0b1110_0000; // Proprietary MType
+    let result = LoraPacket::from_wire(&bytes);
+    assert!(result.is_ok(), "256-byte buffer should parse, got {result:?}");
   }
 
   #[test]

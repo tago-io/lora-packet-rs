@@ -10,10 +10,10 @@ use alloc::string::String;
 /// Every error this crate can produce.
 ///
 /// Variants split into three rough buckets:
-/// 1. **Parsing** ([`Error::TooShort`], [`Error::InvalidMType`],
-///    [`Error::InvalidMajor`], [`Error::InvalidRejoinType`],
-///    [`Error::ConflictingMacCommands`], [`Error::FOptsTooLong`],
-///    [`Error::InvalidJoinAcceptLength`]).
+/// 1. **Parsing** ([`Error::TooShort`], [`Error::TooLong`],
+///    [`Error::InvalidMType`], [`Error::InvalidMajor`],
+///    [`Error::InvalidRejoinType`], [`Error::ConflictingMacCommands`],
+///    [`Error::FOptsTooLong`], [`Error::InvalidJoinAcceptLength`]).
 /// 2. **Construction** ([`Error::InvalidKeyLength`],
 ///    [`Error::InvalidIdentifierLength`], [`Error::MissingField`],
 ///    [`Error::PayloadTooLarge`]).
@@ -32,6 +32,18 @@ pub enum Error {
   TooShort {
     /// Required minimum length.
     expected: usize,
+    /// Actual length provided.
+    got: usize,
+  },
+
+  /// Wire buffer exceeded the `LoRaWAN` PHY maximum of 256 bytes.
+  ///
+  /// PHY payload size varies by region but never exceeds 256 bytes total in
+  /// any `LoRaWAN` regional plan. Beyond this limit, the 1-byte length field
+  /// in CMAC B0/B1 blocks would silently wrap and produce a deterministic
+  /// but wrong MIC. Reject the input early.
+  #[error("invalid wire format: {got} bytes exceeds maximum of 256")]
+  TooLong {
     /// Actual length provided.
     got: usize,
   },

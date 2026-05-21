@@ -648,18 +648,29 @@ fn data_frame_with_large_frm_payload_parses() {
 }
 
 #[test]
-fn proprietary_with_large_body_parses() {
-  // 1 MHDR + 4080 body + 4 MIC = 4085. The crate's payload limit of 4080
-  // applies only to FRMPayload AES-CTR encryption, not to Proprietary or
-  // parse paths. Make sure parser handles the size without panic.
+fn proprietary_with_oversized_body_rejected() {
+  // The parser caps PHY input at 256 bytes (the LoRaWAN PHY maximum across
+  // all regional plans). Past that, the 1-byte length field in CMAC B0/B1
+  // would wrap and produce a wrong-but-deterministic MIC, so reject up front.
   let mut bytes = vec![0xE0];
   bytes.extend_from_slice(&vec![0x77; 4080]);
   bytes.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+  let err = LoraPacket::from_wire(&bytes).unwrap_err();
+  assert!(matches!(err, lora_packet::Error::TooLong { got: 4085 }));
+}
+
+#[test]
+fn proprietary_at_max_size_parses() {
+  // 1 MHDR + 251 body + 4 MIC = 256, exactly at the cap.
+  let mut bytes = vec![0xE0];
+  bytes.extend_from_slice(&vec![0x77; 251]);
+  bytes.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+  assert_eq!(bytes.len(), 256);
   let p = LoraPacket::from_wire(&bytes).unwrap();
   assert_eq!(p.m_type(), MType::Proprietary);
   match &p.payload {
     Payload::Proprietary(body) => {
-      assert_eq!(body.len(), 4080);
+      assert_eq!(body.len(), 251);
       assert!(body.iter().all(|b| *b == 0x77));
     }
     other => panic!("expected Proprietary, got {other:?}"),
