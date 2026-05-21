@@ -303,6 +303,33 @@ impl LoraPacket {
     }
   }
 
+  /// Direction of this packet on the `LoRaWAN` network.
+  ///
+  /// - [`JoinRequest`] is always uplink (device to network server).
+  /// - [`JoinAccept`] is always downlink (network server to device).
+  /// - [`Data`] returns the direction encoded in its `MType`.
+  /// - [`RejoinRequest`] is always uplink.
+  /// - [`Payload::Proprietary`] has no protocol-defined direction;
+  ///   this method returns `None` in that case.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lora_packet::{LoraPacket, Direction};
+  ///
+  /// let bytes = hex::decode("40f17dbe4900020001954378762b11ff0d").unwrap();
+  /// let packet = LoraPacket::from_wire(&bytes).unwrap();
+  /// assert_eq!(packet.direction(), Some(Direction::Uplink));
+  /// ```
+  pub const fn direction(&self) -> Option<Direction> {
+    match &self.payload {
+      Payload::JoinRequest(_) | Payload::RejoinRequest(_) => Some(Direction::Uplink),
+      Payload::JoinAccept(_) => Some(Direction::Downlink),
+      Payload::Data(d) => Some(d.direction),
+      Payload::Proprietary(_) => None,
+    }
+  }
+
   /// Verify the MIC using the `LoRaWAN` 1.0 key set.
   ///
   /// Compares against `self.mic` in constant time
@@ -1477,6 +1504,78 @@ mod tests {
     assert!(p.is_join_request());
     assert!(p.as_join_request().is_some());
     assert!(p.as_data().is_none());
+  }
+
+  #[test]
+  fn direction_join_request_is_uplink() {
+    let p = LoraPacket {
+      phy_payload: alloc::vec![],
+      mhdr: Mhdr::from_parts(MType::JoinRequest, 0),
+      mic: [0u8; 4],
+      payload: Payload::JoinRequest(JoinRequest {
+        join_eui: AppEui::new([0u8; 8]),
+        dev_eui: DevEui::new([0u8; 8]),
+        dev_nonce: DevNonce::new([0u8; 2]),
+      }),
+    };
+    assert_eq!(p.direction(), Some(Direction::Uplink));
+  }
+
+  #[test]
+  fn direction_join_accept_is_downlink() {
+    let p = LoraPacket {
+      phy_payload: alloc::vec![],
+      mhdr: Mhdr::from_parts(MType::JoinAccept, 0),
+      mic: [0u8; 4],
+      payload: Payload::JoinAccept(JoinAccept {
+        join_nonce: AppNonce::new([0u8; 3]),
+        net_id: NetId::new([0u8; 3]),
+        dev_addr: DevAddr::new([0u8; 4]),
+        dl_settings: DlSettings(0),
+        rx_delay: 0,
+        cf_list: None,
+        join_req_type: None,
+      }),
+    };
+    assert_eq!(p.direction(), Some(Direction::Downlink));
+  }
+
+  #[test]
+  fn direction_data_matches_inner_field() {
+    assert_eq!(
+      sample_data_packet(false, Direction::Uplink).direction(),
+      Some(Direction::Uplink)
+    );
+    assert_eq!(
+      sample_data_packet(true, Direction::Downlink).direction(),
+      Some(Direction::Downlink)
+    );
+  }
+
+  #[test]
+  fn direction_rejoin_request_is_uplink() {
+    let p = LoraPacket {
+      phy_payload: alloc::vec![],
+      mhdr: Mhdr::from_parts(MType::RejoinRequest, 0),
+      mic: [0u8; 4],
+      payload: Payload::RejoinRequest(RejoinRequest::Type0 {
+        net_id: NetId::new([0u8; 3]),
+        dev_eui: DevEui::new([0u8; 8]),
+        rj_count_0: [0u8; 2],
+      }),
+    };
+    assert_eq!(p.direction(), Some(Direction::Uplink));
+  }
+
+  #[test]
+  fn direction_proprietary_is_none() {
+    let p = LoraPacket {
+      phy_payload: alloc::vec![],
+      mhdr: Mhdr::from_parts(MType::Proprietary, 0),
+      mic: [0u8; 4],
+      payload: Payload::Proprietary(alloc::vec![1, 2, 3]),
+    };
+    assert_eq!(p.direction(), None);
   }
 
   #[test]
