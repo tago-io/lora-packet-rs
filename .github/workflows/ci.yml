@@ -11,6 +11,9 @@ env:
   RUST_BACKTRACE: short
   RUSTFLAGS: "-D warnings"
 
+permissions:
+  contents: read
+
 jobs:
   fmt:
     name: fmt
