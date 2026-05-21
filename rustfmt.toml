@@ -1,4 +1,5 @@
 edition = "2024"
+style_edition = "2024"
 max_width = 120
 tab_spaces = 2
 imports_granularity = "Module"
