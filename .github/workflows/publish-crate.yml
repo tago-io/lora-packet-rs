@@ -1,9 +1,8 @@
 name: Publish Crate
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
 
 jobs:
   publish:
@@ -18,12 +17,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Verify tag matches Cargo.toml version
+      - name: Verify release tag matches Cargo.toml version
         run: |
           tag_version="${GITHUB_REF_NAME#v}"
           cargo_version="$(cargo pkgid | sed -E 's/.*[#@]([0-9]+\.[0-9]+\.[0-9]+.*)$/\1/')"
           if [ "$tag_version" != "$cargo_version" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match Cargo.toml version $cargo_version"
+            echo "Release tag $GITHUB_REF_NAME does not match Cargo.toml version $cargo_version"
             exit 1
           fi
 

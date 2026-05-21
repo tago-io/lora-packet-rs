@@ -292,6 +292,35 @@ the matching Rust file in the same PR.
   `gh api repos/{owner}/{repo}/pulls/<n>/comments` for review comments,
   `gh api repos/{owner}/{repo}/issues/<n>/comments` for issue comments.
 
+## Releasing a new version
+
+GitHub releases are the source of truth for changelogs. Do **not** push
+tags manually - always create a release through GitHub. The release
+publish event triggers `.github/workflows/publish-crate.yml`, which
+authenticates with crates.io via OIDC trusted publishing and runs
+`cargo publish`.
+
+Procedure:
+
+1. Bump `version` in `Cargo.toml` (follow semver: patch for bug fixes,
+   minor for backwards-compatible features, major for breaking changes).
+2. Commit on `main`: `chore(crate): bump version to X.Y.Z`.
+3. Push and wait for CI to be green.
+4. Go to https://github.com/tago-io/lora-packet-rs/releases/new
+   - **Tag**: `vX.Y.Z` (the workflow rejects mismatches with `Cargo.toml`)
+   - **Title**: `vX.Y.Z`
+   - **Body**: changelog as markdown bullets (`### Added`, `### Fixed`,
+     `### Changed`, `### Breaking`, `### Internal` as needed)
+   - Click **Publish release**.
+5. Watch the `Publish Crate` workflow at
+   https://github.com/tago-io/lora-packet-rs/actions/workflows/publish-crate.yml.
+   On success, the new version is live at
+   https://crates.io/crates/lora-packet.
+
+If the publish fails, fix the cause, then re-run the workflow from the
+Actions UI (`Re-run all jobs`) - do not delete and recreate the release
+unless the tag itself is wrong.
+
 ## Integration guide
 
 - `docs/AGENT_INTEGRATION.md`: downstream patterns (Lambda middleware,
