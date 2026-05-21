@@ -25,11 +25,9 @@ If you are an AI coding agent landing in this repo, read this section first.
   must have a Rust mirror in `tests/*.rs` with the same inputs and
   expected outputs. The Rust test's doc comment names its TS source for
   traceability.
-- **Where the design lives**:
-  - `docs/superpowers/specs/2026-05-20-lora-packet-rs-design.md` (design)
-  - `docs/superpowers/plans/2026-05-20-lora-packet-implementation.md` (plan)
-  - `docs/migration.md` (TS-to-Rust function map, also user-facing)
-  - `docs/ts-source-map.md` (which Rust module mirrors which TS file)
+- **Where the integration guide lives**: `docs/AGENT_INTEGRATION.md` covers
+  downstream patterns (Lambda middleware, embedded firmware) and common
+  anti-patterns when wiring this crate into a larger system.
 
 ## Repository layout
 
@@ -46,9 +44,7 @@ If you are an AI coding agent landing in this repo, read this section first.
 ├── deny.toml                         License + advisory rules for cargo-deny
 ├── .github/workflows/                CI (fmt, clippy, test, deny, no_std)
 ├── docs/
-│   ├── migration.md                  TS-to-Rust function map (user-facing)
-│   ├── ts-source-map.md              Module-to-TS-file map (internal)
-│   └── superpowers/                  Design and plan documents
+│   └── AGENT_INTEGRATION.md          Downstream integration guide
 ├── src/
 │   ├── lib.rs                        Crate-level rustdoc + re-exports
 │   ├── error.rs                      Single `Error` enum + `Result<T>` alias
@@ -296,16 +292,8 @@ the matching Rust file in the same PR.
   `gh api repos/{owner}/{repo}/pulls/<n>/comments` for review comments,
   `gh api repos/{owner}/{repo}/issues/<n>/comments` for issue comments.
 
-## Design and history
+## Integration guide
 
-- `docs/superpowers/specs/2026-05-20-lora-packet-rs-design.md`: the
-  original design doc. Read this for the rationale behind type splits
-  (`V1_0MicKeys` vs `V1_1MicKeys`), the builder shape, and why crypto
-  lives next to key derivation.
-- `docs/superpowers/plans/2026-05-20-lora-packet-implementation.md`: the
-  implementation plan with phased milestones. Useful when porting another
-  module from the TS reference.
-- `docs/migration.md`: function-by-function TS-to-Rust map. Update when
-  the public API changes.
-- `docs/ts-source-map.md`: which Rust file mirrors which TS file.
-  Internal scaffolding; will be removed after v1 ships.
+- `docs/AGENT_INTEGRATION.md`: downstream patterns (Lambda middleware,
+  embedded firmware, error handling, performance notes). Read before
+  wiring this crate into a larger system.
