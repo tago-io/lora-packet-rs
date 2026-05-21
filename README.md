@@ -7,6 +7,14 @@ LoRaWAN 1.0 / 1.1 packet decoder and encoder for Rust.
 
 Parse and build PHYPayload frames, AES-ECB FRMPayload + FOpts crypt, AES-CMAC MIC, and OTAA/JS/WOR key derivation. Works on `std` and `no_std + alloc`.
 
+## Why this crate
+
+- **Strong newtypes for every key and identifier.** `AppSKey`, `NwkSKey`, `DevAddr`, and `FNwkSIntKey` are distinct types. The compiler stops you mixing them up.
+- **Constant-time MIC comparison.** Verification uses `subtle::ConstantTimeEq` so timing side-channels do not leak.
+- **Keys auto-zeroize on drop.** Every key newtype derives `ZeroizeOnDrop`; their `Debug` impls are redacted.
+- **`no_std + alloc` ready.** Switch the `std` feature off and the same API works on embedded targets with a global allocator.
+- **No `unsafe`.** `#![deny(unsafe_code)]` is enforced at the crate root.
+
 ## Quickstart
 
 ```rust
@@ -91,6 +99,13 @@ if let Payload::RejoinRequest(rj) = &packet.payload {
 | `hex_base64` | no      | Adds `from_hex` and `from_base64` constructors on keys, ids, packets  |
 
 Embedded users: `cargo add lora-packet --no-default-features`.
+
+## LoRaWAN reference
+
+- [LoRaWAN 1.0.4 Specification (TS001-1.0.4)](https://resources.lora-alliance.org/technical-specifications/ts001-1-0-4-lorawan-l2-1-0-4-specification)
+- [LoRaWAN 1.1 Specification (TS001-1.1)](https://resources.lora-alliance.org/technical-specifications/lorawan-specification-v1-1)
+- [LoRaWAN Regional Parameters RP002-1.0.4](https://resources.lora-alliance.org/technical-specifications/rp002-1-0-4-regional-parameters)
+- [LoRa Alliance Errata: `FCntDwn` Usage in `FOpts` Encryption (CR v2 r1)](https://resources.lora-alliance.org/document/lorawan-1-1-specification-errata)
 
 ## License
 
