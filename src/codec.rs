@@ -1477,3 +1477,17 @@ mod tests {
     assert!(packet.verify_mic_v1_0(&keys).unwrap());
   }
 }
+
+#[cfg(test)]
+mod prop_tests {
+  use super::*;
+  use proptest::prelude::*;
+
+  proptest! {
+    #[test]
+    fn from_wire_never_panics(bytes in proptest::collection::vec(any::<u8>(), 0..=1000)) {
+      // It must return Result, never panic.
+      let _ = LoraPacket::from_wire(&bytes);
+    }
+  }
+}
