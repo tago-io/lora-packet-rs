@@ -12,6 +12,7 @@ keywords = ["lora", "lorawan", "packet", "codec", "iot"]
 categories = ["encoding", "embedded", "no-std", "parser-implementations"]
 include = [
   "src/**/*.rs",
+  "tests/**/*.rs",
   "Cargo.toml",
   "LICENSE",
   "README.md",
