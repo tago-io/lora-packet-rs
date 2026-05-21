@@ -10,6 +10,12 @@ readme = "README.md"
 license = "MIT"
 keywords = ["lora", "lorawan", "packet", "codec", "iot"]
 categories = ["encoding", "embedded", "no-std", "parser-implementations"]
+include = [
+  "src/**/*.rs",
+  "Cargo.toml",
+  "LICENSE",
+  "README.md",
+]
 
 [features]
 default = ["std"]
