@@ -388,7 +388,7 @@ impl crate::codec::JoinAccept {
   /// must be 17 (one block) or 33 (two blocks).
   ///
   /// # Errors
-  /// `Error::TooShort` when the total length is outside {17, 33}.
+  /// `Error::InvalidJoinAcceptLength` when the total length is outside {17, 33}.
   pub fn decrypt_from_wire(ciphertext: &[u8], app_key: &AppKey) -> crate::Result<alloc::vec::Vec<u8>> {
     join_accept_transform(ciphertext, app_key, aes_ecb_encrypt)
   }
@@ -397,7 +397,7 @@ impl crate::codec::JoinAccept {
   /// body); the MHDR is left as-is.
   ///
   /// # Errors
-  /// `Error::TooShort` when the total length is outside {17, 33}.
+  /// `Error::InvalidJoinAcceptLength` when the total length is outside {17, 33}.
   pub fn encrypt_for_wire(plaintext: &[u8], app_key: &AppKey) -> crate::Result<alloc::vec::Vec<u8>> {
     join_accept_transform(plaintext, app_key, aes_ecb_decrypt)
   }
@@ -409,10 +409,7 @@ fn join_accept_transform(
   op: fn(&[u8; 16], &[u8; 16]) -> [u8; 16],
 ) -> crate::Result<alloc::vec::Vec<u8>> {
   if input.len() != 17 && input.len() != 33 {
-    return Err(crate::Error::TooShort {
-      expected: 17,
-      got: input.len(),
-    });
+    return Err(crate::Error::InvalidJoinAcceptLength(input.len()));
   }
   let mut out = alloc::vec::Vec::with_capacity(input.len());
   out.push(input[0]);

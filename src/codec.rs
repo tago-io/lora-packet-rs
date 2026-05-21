@@ -893,7 +893,7 @@ impl LoraPacketBuilder {
   /// to the plaintext form.
   ///
   /// # Errors
-  /// `Error::Other` if required Join Accept fields are missing.
+  /// `Error::MissingField` if required Join Accept fields are missing.
   pub fn sign_join_accept(self, app_key: &crate::types::AppKey) -> crate::Result<(LoraPacket, alloc::vec::Vec<u8>)> {
     let mut packet = self.build_unsigned()?;
     let keys = crate::mic::V1_0MicKeys {
@@ -905,12 +905,13 @@ impl LoraPacketBuilder {
     Ok((packet, encrypted_wire))
   }
 
-  /// Build a Join Request and compute its MIC (works for both 1.0 and 1.1;
-  /// the caller passes the appropriate key as `AppKey` for 1.0 or as a `NwkKey`
-  /// cast through `AppKey::new` for 1.1, since the algorithm is identical).
+  /// Build a Join Request and compute its MIC using `LoRaWAN` 1.0 `AppKey`.
+  ///
+  /// For `LoRaWAN` 1.1, use [`sign_join_request_v1_1`](Self::sign_join_request_v1_1)
+  /// which takes a `NwkKey` directly.
   ///
   /// # Errors
-  /// `Error::Other` if required fields are missing.
+  /// `Error::MissingField` if required fields are missing.
   pub fn sign_join_request(self, app_key: &crate::types::AppKey) -> crate::Result<LoraPacket> {
     let mut packet = self.build_unsigned()?;
     let keys = crate::mic::V1_0MicKeys {
@@ -928,7 +929,7 @@ impl LoraPacketBuilder {
   /// The MIC is then calculated using `LoRaWAN` 1.0 algorithm with `NwkSKey`.
   ///
   /// # Errors
-  /// - `Error::Other` if required Data fields are missing.
+  /// - `Error::MissingField` if required Data fields are missing.
   /// - Any error from `build_unsigned` or `recalculate_mic_v1_0`.
   pub fn sign_and_encrypt(
     self,
@@ -959,47 +960,30 @@ impl LoraPacketBuilder {
   /// `recalculate_mic_*` on the resulting `LoraPacket`, to fill in the MIC.
   ///
   /// # Errors
-  /// `Error::Other` when a required field for the chosen `MType` is missing.
+  /// `Error::MissingField` when a required field for the chosen `MType` is missing.
+  /// `Error::FOptsTooLong` when the `FOpts` vec exceeds the 15-byte wire limit.
   /// `Error::InvalidRejoinType` when the rejoin type is not in {0, 1, 2}.
   pub fn build_unsigned(self) -> crate::Result<LoraPacket> {
-    let m_type = self
-      .m_type
-      .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: m_type not set")))?;
+    let m_type = self.m_type.ok_or(crate::Error::MissingField("m_type"))?;
     let mhdr = Mhdr::from_parts(m_type, self.major);
 
     let payload = match m_type {
       MType::JoinRequest => Payload::JoinRequest(JoinRequest {
-        join_eui: self
-          .join_eui
-          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: join_eui not set")))?,
-        dev_eui: self
-          .dev_eui
-          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dev_eui not set")))?,
-        dev_nonce: self
-          .dev_nonce
-          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dev_nonce not set")))?,
+        join_eui: self.join_eui.ok_or(crate::Error::MissingField("join_eui"))?,
+        dev_eui: self.dev_eui.ok_or(crate::Error::MissingField("dev_eui"))?,
+        dev_nonce: self.dev_nonce.ok_or(crate::Error::MissingField("dev_nonce"))?,
       }),
       MType::JoinAccept => Payload::JoinAccept(JoinAccept {
-        join_nonce: self
-          .join_nonce
-          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: join_nonce not set")))?,
-        net_id: self
-          .net_id
-          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: net_id not set")))?,
-        dev_addr: self
-          .dev_addr
-          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dev_addr not set")))?,
-        dl_settings: self
-          .dl_settings
-          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dl_settings not set")))?,
+        join_nonce: self.join_nonce.ok_or(crate::Error::MissingField("join_nonce"))?,
+        net_id: self.net_id.ok_or(crate::Error::MissingField("net_id"))?,
+        dev_addr: self.dev_addr.ok_or(crate::Error::MissingField("dev_addr"))?,
+        dl_settings: self.dl_settings.ok_or(crate::Error::MissingField("dl_settings"))?,
         rx_delay: self.rx_delay.unwrap_or(0),
         cf_list: self.cf_list,
         join_req_type: self.join_req_type,
       }),
       MType::UnconfirmedDataUp | MType::UnconfirmedDataDown | MType::ConfirmedDataUp | MType::ConfirmedDataDown => {
-        let direction = self
-          .direction
-          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: direction not set")))?;
+        let direction = self.direction.ok_or(crate::Error::MissingField("direction"))?;
         let f_opts_len = u8::try_from(self.f_opts.len()).map_err(|_| crate::Error::FOptsTooLong(self.f_opts.len()))?;
         if f_opts_len > 15 {
           return Err(crate::Error::FOptsTooLong(self.f_opts.len()));
@@ -1007,9 +991,7 @@ impl LoraPacketBuilder {
         Payload::Data(Data {
           direction,
           confirmed: self.confirmed,
-          dev_addr: self
-            .dev_addr
-            .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dev_addr not set")))?,
+          dev_addr: self.dev_addr.ok_or(crate::Error::MissingField("dev_addr"))?,
           f_ctrl: self.f_ctrl.unwrap_or(FCtrl(f_opts_len & 0x0f)),
           f_cnt: self.f_cnt.unwrap_or(0).to_le_bytes(),
           f_opts: self.f_opts,
@@ -1018,28 +1000,20 @@ impl LoraPacketBuilder {
         })
       }
       MType::RejoinRequest => {
-        let dev_eui = self
-          .dev_eui
-          .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: dev_eui not set")))?;
+        let dev_eui = self.dev_eui.ok_or(crate::Error::MissingField("dev_eui"))?;
         Payload::RejoinRequest(match self.rejoin_type.unwrap_or(0) {
           0 => RejoinRequest::Type0 {
-            net_id: self
-              .net_id
-              .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: net_id not set")))?,
+            net_id: self.net_id.ok_or(crate::Error::MissingField("net_id"))?,
             dev_eui,
             rj_count_0: [0, 0],
           },
           1 => RejoinRequest::Type1 {
-            join_eui: self
-              .join_eui
-              .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: join_eui not set")))?,
+            join_eui: self.join_eui.ok_or(crate::Error::MissingField("join_eui"))?,
             dev_eui,
             rj_count_1: [0, 0],
           },
           2 => RejoinRequest::Type2 {
-            net_id: self
-              .net_id
-              .ok_or_else(|| crate::Error::Other(alloc::string::String::from("builder: net_id not set")))?,
+            net_id: self.net_id.ok_or(crate::Error::MissingField("net_id"))?,
             dev_eui,
             rj_count_0: [0, 0],
           },

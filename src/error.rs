@@ -60,9 +60,17 @@ pub enum Error {
   #[error("missing key for operation: {0}")]
   MissingKey(&'static str),
 
+  /// Builder finalization failed because a required field was not set.
+  #[error("required builder field not set: {0}")]
+  MissingField(&'static str),
+
   /// Builder produced a payload larger than the wire encoding allows.
   #[error("payload too large: {0} bytes")]
   PayloadTooLarge(usize),
+
+  /// Join Accept ciphertext had a length outside the valid range (17 or 33 bytes).
+  #[error("invalid Join Accept length: {0} bytes (expected 17 or 33)")]
+  InvalidJoinAcceptLength(usize),
 
   /// Generic catch-all with a string message (used sparingly).
   #[error("{0}")]
