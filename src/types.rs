@@ -7,6 +7,7 @@ use crate::error::{Error, Result};
 
 /// `LoRaWAN` message types as encoded in the high 3 bits of MHDR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum MType {
   /// Device join request (OTAA).
@@ -51,6 +52,7 @@ impl MType {
 
 /// Direction of a `LoRaWAN` data frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Direction {
   /// Device to network server.
   Uplink,
@@ -60,6 +62,7 @@ pub enum Direction {
 
 /// `LoRaWAN` protocol version used by a particular MIC or crypto operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LorawanVersion {
   /// `LoRaWAN` 1.0.x.
   V1_0,
@@ -69,6 +72,7 @@ pub enum LorawanVersion {
 
 /// MHDR byte: 3 bits `MType`, 3 bits RFU, 2 bits Major.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Mhdr(pub u8);
 
 impl Mhdr {
@@ -111,6 +115,7 @@ impl Mhdr {
 /// - Bit 4: `ClassB` (uplink) / `FPending` (downlink)
 /// - Bits 3..0: `FOptsLen`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FCtrl(pub u8);
 
 impl FCtrl {
@@ -162,6 +167,7 @@ impl FCtrl {
 /// - Bits 6..4: `RX1DRoffset`
 /// - Bits 3..0: `RX2DataRate`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DlSettings(pub u8);
 
 impl DlSettings {
@@ -196,6 +202,7 @@ macro_rules! id_newtype {
   ($(#[$meta:meta])* $name:ident, $len:expr) => {
     $(#[$meta])*
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct $name(pub [u8; $len]);
 
     impl $name {
@@ -294,7 +301,57 @@ macro_rules! key_newtype {
         write!(f, concat!(stringify!($name), "(***)"))
       }
     }
+
+    #[cfg(feature = "serde")]
+    impl serde::Serialize for $name {
+      fn serialize<S: serde::Serializer>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(&hex_encode_16(&self.0))
+      }
+    }
+
+    #[cfg(feature = "serde")]
+    impl<'de> serde::Deserialize<'de> for $name {
+      fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, D::Error> {
+        let s = <alloc::string::String as serde::Deserialize>::deserialize(deserializer)?;
+        let bytes = hex_decode_16(&s).map_err(serde::de::Error::custom)?;
+        Ok(Self(bytes))
+      }
+    }
   };
+}
+
+#[cfg(feature = "serde")]
+fn hex_encode_16(b: &[u8; 16]) -> alloc::string::String {
+  let mut s = alloc::string::String::with_capacity(32);
+  for byte in b {
+    use core::fmt::Write;
+    let _ = write!(s, "{byte:02x}");
+  }
+  s
+}
+
+#[cfg(feature = "serde")]
+fn hex_decode_16(s: &str) -> core::result::Result<[u8; 16], &'static str> {
+  if s.len() != 32 {
+    return Err("expected 32 hex characters for a 16-byte key");
+  }
+  let mut out = [0u8; 16];
+  for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
+    let hi = hex_nibble(chunk[0])?;
+    let lo = hex_nibble(chunk[1])?;
+    out[i] = (hi << 4) | lo;
+  }
+  Ok(out)
+}
+
+#[cfg(feature = "serde")]
+const fn hex_nibble(b: u8) -> core::result::Result<u8, &'static str> {
+  match b {
+    b'0'..=b'9' => Ok(b - b'0'),
+    b'a'..=b'f' => Ok(b - b'a' + 10),
+    b'A'..=b'F' => Ok(b - b'A' + 10),
+    _ => Err("invalid hex character"),
+  }
 }
 
 key_newtype!(

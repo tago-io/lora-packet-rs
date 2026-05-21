@@ -12,6 +12,7 @@ use crate::types::{AppEui, AppNonce, DevAddr, DevEui, DevNonce, Direction, DlSet
 /// `Payload`. The variant carries every field that is meaningful for that
 /// message type; fields that do not apply are not representable.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LoraPacket {
   /// Full wire bytes (MHDR + `MACPayload` + MIC).
   pub phy_payload: Vec<u8>,
@@ -25,6 +26,7 @@ pub struct LoraPacket {
 
 /// Discriminated union over `LoRaWAN` message variants.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Payload {
   /// OTAA join request.
   JoinRequest(JoinRequest),
@@ -40,6 +42,7 @@ pub enum Payload {
 
 /// Fields of an OTAA Join Request.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct JoinRequest {
   /// Join EUI (`LoRaWAN` 1.1 spec name for `AppEUI`).
   pub join_eui: AppEui,
@@ -51,6 +54,7 @@ pub struct JoinRequest {
 
 /// Fields of a Join Accept (plaintext, after decrypt).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct JoinAccept {
   /// Server-generated nonce.
   pub join_nonce: AppNonce,
@@ -70,6 +74,7 @@ pub struct JoinAccept {
 
 /// Fields of a Data message (confirmed/unconfirmed, uplink/downlink).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Data {
   /// Direction inferred from `MType`.
   pub direction: Direction,
@@ -91,6 +96,7 @@ pub struct Data {
 
 /// Rejoin Request body (`LoRaWAN` 1.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RejoinRequest {
   /// Type 0: `NetID` + `DevEUI` + `RJCount0`.
   Type0 {
