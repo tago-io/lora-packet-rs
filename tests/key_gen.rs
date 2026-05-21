@@ -90,8 +90,14 @@ fn should_generate_js_keys() {
   let nwk_key = NwkKey::new(key_from_hex("089234b089c2d8490edf8c9f9b8e8f9c"));
   let dev_eui = DevEui::new([0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]);
   let js = JoinServerKeys::derive(&nwk_key, &dev_eui);
-  assert_eq!(hex::encode(js.js_int_key.as_bytes()), "bd147194430d6fec1351a327ee40e264");
-  assert_eq!(hex::encode(js.js_enc_key.as_bytes()), "8c61658dc01ee8add0c0becf90d2dc50");
+  assert_eq!(
+    hex::encode(js.js_int_key.as_bytes()),
+    "bd147194430d6fec1351a327ee40e264"
+  );
+  assert_eq!(
+    hex::encode(js.js_enc_key.as_bytes()),
+    "8c61658dc01ee8add0c0becf90d2dc50"
+  );
 }
 
 /// Mirror of `__tests__/key_gen_test.ts`: "should generate WOR Root key"
@@ -197,6 +203,12 @@ fn should_generate_js_keys_in_1_1() {
   let nwk_key = NwkKey::new(key_from_hex("01010101010101010101010101010101"));
   let dev_eui = DevEui::new([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]);
   let js = JoinServerKeys::derive(&nwk_key, &dev_eui);
-  assert_eq!(hex::encode(js.js_int_key.as_bytes()), "6b9cc9b000daebb610f1e39758cf69df");
-  assert_eq!(hex::encode(js.js_enc_key.as_bytes()), "c31fa11abb646ee1c21d5835815528ea");
+  assert_eq!(
+    hex::encode(js.js_int_key.as_bytes()),
+    "6b9cc9b000daebb610f1e39758cf69df"
+  );
+  assert_eq!(
+    hex::encode(js.js_enc_key.as_bytes()),
+    "c31fa11abb646ee1c21d5835815528ea"
+  );
 }

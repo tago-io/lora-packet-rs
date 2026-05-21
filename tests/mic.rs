@@ -1,8 +1,6 @@
 //! Integration tests mirroring `__tests__/mic_test.ts`.
 
-use lora_packet::{
-  AppKey, FNwkSIntKey, LoraPacket, NwkKey, NwkSKey, SNwkSIntKey, V1_0MicKeys, V1_1MicKeys,
-};
+use lora_packet::{AppKey, FNwkSIntKey, LoraPacket, NwkKey, NwkSKey, SNwkSIntKey, V1_0MicKeys, V1_1MicKeys};
 
 fn hex_to_vec(s: &str) -> Vec<u8> {
   hex::decode(s).expect("valid hex string")

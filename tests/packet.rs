@@ -42,7 +42,10 @@ fn should_create_packet_with_minimal_input() {
     .unwrap();
 
   // PHYPayload: MHDR(40) + FHDR(d4c3b2a1 + 00 + 0000) + FPort(01) + payload("test") + MIC(0)
-  let expected_phy_payload = hex_to_vec("40d4c3b2a10000000174657374").into_iter().chain([0, 0, 0, 0]).collect::<Vec<_>>();
+  let expected_phy_payload = hex_to_vec("40d4c3b2a10000000174657374")
+    .into_iter()
+    .chain([0, 0, 0, 0])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_phy_payload);
   assert_eq!(packet.mhdr.as_byte(), 0x40);
   assert_eq!(packet.mic, [0, 0, 0, 0]);
@@ -72,7 +75,10 @@ fn should_omit_fport_if_no_payload_or_port() {
     .unwrap();
 
   // PHYPayload: MHDR(40) + DevAddr + FCtrl(00) + FCnt(0100) + MIC(0)
-  let expected_phy_payload = hex_to_vec("40d4c3b2a1000100").into_iter().chain([0, 0, 0, 0]).collect::<Vec<_>>();
+  let expected_phy_payload = hex_to_vec("40d4c3b2a1000100")
+    .into_iter()
+    .chain([0, 0, 0, 0])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_phy_payload);
   assert_eq!(packet.mhdr.as_byte(), 0x40);
   assert_eq!(packet.mic, [0, 0, 0, 0]);
@@ -104,7 +110,10 @@ fn should_create_packet_with_mtype_as_integer_5() {
     .build_unsigned()
     .unwrap();
 
-  let expected_phy_payload = hex_to_vec("A0d4c3b2a10001000174657374").into_iter().chain([0, 0, 0, 0]).collect::<Vec<_>>();
+  let expected_phy_payload = hex_to_vec("A0d4c3b2a10001000174657374")
+    .into_iter()
+    .chain([0, 0, 0, 0])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_phy_payload);
   assert_eq!(packet.mhdr.as_byte(), 0xA0);
   let d = packet.as_data().unwrap();
@@ -131,7 +140,10 @@ fn should_create_packet_with_mtype_as_string_confirmed_data_up() {
     .build_unsigned()
     .unwrap();
 
-  let expected_phy_payload = hex_to_vec("80d4c3b2a10001000174657374").into_iter().chain([0, 0, 0, 0]).collect::<Vec<_>>();
+  let expected_phy_payload = hex_to_vec("80d4c3b2a10001000174657374")
+    .into_iter()
+    .chain([0, 0, 0, 0])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_phy_payload);
   assert_eq!(packet.mhdr.as_byte(), 0x80);
 
@@ -181,7 +193,10 @@ fn should_create_packet_with_fcnt_as_buffer() {
     .build_unsigned()
     .unwrap();
 
-  let expected_phy_payload = hex_to_vec("40d4c3b2a10034120174657374").into_iter().chain([0, 0, 0, 0]).collect::<Vec<_>>();
+  let expected_phy_payload = hex_to_vec("40d4c3b2a10034120174657374")
+    .into_iter()
+    .chain([0, 0, 0, 0])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_phy_payload);
   let d = packet.as_data().unwrap();
   // FCnt is little-endian on the wire (0x1234 -> bytes 34 12).
@@ -204,7 +219,10 @@ fn should_create_packet_with_fcnt_as_number() {
     .build_unsigned()
     .unwrap();
 
-  let expected_phy_payload = hex_to_vec("40d4c3b2a10034120174657374").into_iter().chain([0, 0, 0, 0]).collect::<Vec<_>>();
+  let expected_phy_payload = hex_to_vec("40d4c3b2a10034120174657374")
+    .into_iter()
+    .chain([0, 0, 0, 0])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_phy_payload);
   let d = packet.as_data().unwrap();
   assert_eq!(d.f_cnt, [0x34, 0x12]);
@@ -227,7 +245,10 @@ fn should_create_packet_with_fopts() {
     .build_unsigned()
     .unwrap();
 
-  let expected_phy_payload = hex_to_vec("40d4c3b2a1040100F0F1F2F30174657374").into_iter().chain([0, 0, 0, 0]).collect::<Vec<_>>();
+  let expected_phy_payload = hex_to_vec("40d4c3b2a1040100F0F1F2F30174657374")
+    .into_iter()
+    .chain([0, 0, 0, 0])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_phy_payload);
   let d = packet.as_data().unwrap();
   assert_eq!(d.f_opts, vec![0xF0, 0xF1, 0xF2, 0xF3]);
@@ -326,12 +347,18 @@ fn should_create_join_request_packet() {
     .build_unsigned()
     .unwrap();
 
-  let expected_phy_payload = hex_to_vec("00DDCCBBAADDCCBBAADDCCBBAADDCCBBAABBAA").into_iter().chain([0, 0, 0, 0]).collect::<Vec<_>>();
+  let expected_phy_payload = hex_to_vec("00DDCCBBAADDCCBBAADDCCBBAADDCCBBAABBAA")
+    .into_iter()
+    .chain([0, 0, 0, 0])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_phy_payload);
   assert_eq!(packet.mhdr.as_byte(), 0x00);
 
   let jr = packet.as_join_request().unwrap();
-  assert_eq!(jr.join_eui.as_bytes(), &[0xAA, 0xBB, 0xCC, 0xDD, 0xAA, 0xBB, 0xCC, 0xDD]);
+  assert_eq!(
+    jr.join_eui.as_bytes(),
+    &[0xAA, 0xBB, 0xCC, 0xDD, 0xAA, 0xBB, 0xCC, 0xDD]
+  );
   assert_eq!(jr.dev_eui.as_bytes(), &[0xAA, 0xBB, 0xCC, 0xDD, 0xAA, 0xBB, 0xCC, 0xDD]);
   assert_eq!(jr.dev_nonce.as_bytes(), &[0xAA, 0xBB]);
 
@@ -353,7 +380,10 @@ fn should_create_join_accept_packet_with_minimal_input() {
     .build_unsigned()
     .unwrap();
 
-  let expected_phy_payload = hex_to_vec("20CCBBAACCBBAADDCCBBAA0000").into_iter().chain([0, 0, 0, 0]).collect::<Vec<_>>();
+  let expected_phy_payload = hex_to_vec("20CCBBAACCBBAADDCCBBAA0000")
+    .into_iter()
+    .chain([0, 0, 0, 0])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_phy_payload);
   let ja = packet.as_join_accept().unwrap();
   assert_eq!(ja.join_nonce.as_bytes(), &[0xAA, 0xBB, 0xCC]);
@@ -377,7 +407,10 @@ fn should_create_join_accept_packet() {
     .build_unsigned()
     .unwrap();
 
-  let expected_phy_payload = hex_to_vec("20CCBBAACCBBAADDCCBBAA120F").into_iter().chain([0, 0, 0, 0]).collect::<Vec<_>>();
+  let expected_phy_payload = hex_to_vec("20CCBBAACCBBAADDCCBBAA120F")
+    .into_iter()
+    .chain([0, 0, 0, 0])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_phy_payload);
   let ja = packet.as_join_accept().unwrap();
   assert_eq!(ja.dl_settings.as_byte(), 0x12);
@@ -403,7 +436,10 @@ fn should_create_join_accept_packet_with_cflist() {
     .build_unsigned()
     .unwrap();
 
-  let expected_phy_payload = hex_to_vec("20CCBBAACCBBAADDCCBBAA120F11223311223311223311223311223300").into_iter().chain([0, 0, 0, 0]).collect::<Vec<_>>();
+  let expected_phy_payload = hex_to_vec("20CCBBAACCBBAADDCCBBAA120F11223311223311223311223311223300")
+    .into_iter()
+    .chain([0, 0, 0, 0])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_phy_payload);
   let ja = packet.as_join_accept().unwrap();
   assert_eq!(ja.cf_list.unwrap(), cf_list);
@@ -544,7 +580,10 @@ fn should_create_packet_with_opt_neg() {
   };
   packet.recalculate_mic_v1_1(&mic_keys).unwrap();
   assert_eq!(packet.mic, [0x93, 0xff, 0x9a, 0x3a]);
-  let expected_plaintext = hex_to_vec("20010101020202040302018000").into_iter().chain([0x93, 0xff, 0x9a, 0x3a]).collect::<Vec<_>>();
+  let expected_plaintext = hex_to_vec("20010101020202040302018000")
+    .into_iter()
+    .chain([0x93, 0xff, 0x9a, 0x3a])
+    .collect::<Vec<_>>();
   assert_eq!(packet.phy_payload, expected_plaintext);
 
   // Encrypted form on the wire.
