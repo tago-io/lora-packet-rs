@@ -1,30 +1,64 @@
 //! Strong typed primitives for `LoRaWAN` packets.
 //!
-//! Includes message-type enums, direction, version, key newtypes, and
-//! bitfield wrappers (`MHDR`, `FCtrl`, `DLSettings`).
+//! Three groups of types live here:
+//!
+//! 1. **Message metadata enums:** [`MType`], [`Direction`], [`LorawanVersion`].
+//! 2. **Bitfield byte wrappers:** [`Mhdr`], [`FCtrl`], [`DlSettings`].
+//! 3. **Strong newtypes for identifiers and keys**: [`DevAddr`], [`DevEui`],
+//!    [`AppEui`] (alias [`JoinEui`]), [`NetId`], [`DevNonce`], [`AppNonce`]
+//!    (alias [`JoinNonce`]), [`AppKey`], [`NwkKey`], [`AppSKey`], [`NwkSKey`],
+//!    [`FNwkSIntKey`], [`SNwkSIntKey`], [`NwkSEncKey`], [`JSIntKey`],
+//!    [`JSEncKey`], [`RootWorSKey`], [`WorSIntKey`], [`WorSEncKey`].
+//!
+//! Identifier newtypes hold `Copy` byte arrays and impl `Debug`. Key newtypes
+//! do *not* implement `Copy` and have a redacted `Debug` impl
+//! (`AppKey(***)`); their bytes are wiped on drop via `zeroize::ZeroizeOnDrop`.
+//! Pass keys by reference; clone only when ownership is genuinely required.
+//!
+//! ## Endianness
+//!
+//! All identifier newtypes store bytes in display order (big-endian,
+//! left-to-right as you would print them). [`crate::LoraPacket::from_wire`]
+//! and [`crate::LoraPacket::to_wire`] reverse byte order for you when reading
+//! or writing the little-endian wire format.
 
 use crate::error::{Error, Result};
 
-/// `LoRaWAN` message types as encoded in the high 3 bits of MHDR.
+/// `LoRaWAN` message types as encoded in the high 3 bits of the MHDR byte.
+///
+/// Use [`MType::from_mhdr`] to extract from a raw MHDR byte, or
+/// [`Mhdr::m_type`] when you already have a [`Mhdr`] wrapper.
+///
+/// All variants are routed through the matching [`crate::Payload`] variant
+/// when you parse with [`crate::LoraPacket::from_wire`].
+///
+/// # Examples
+///
+/// ```
+/// use lora_packet::MType;
+///
+/// assert_eq!(MType::from_mhdr(0x40).unwrap(), MType::UnconfirmedDataUp);
+/// assert_eq!(MType::from_mhdr(0xE0).unwrap(), MType::Proprietary);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(u8)]
 pub enum MType {
-  /// Device join request (OTAA).
+  /// Device join request (OTAA, MHDR bits = `000`).
   JoinRequest = 0b000,
-  /// Server response to a join request.
+  /// Server response to a join request (MHDR bits = `001`).
   JoinAccept = 0b001,
-  /// Uplink data without acknowledgment.
+  /// Uplink data without acknowledgment (MHDR bits = `010`).
   UnconfirmedDataUp = 0b010,
-  /// Downlink data without acknowledgment.
+  /// Downlink data without acknowledgment (MHDR bits = `011`).
   UnconfirmedDataDown = 0b011,
-  /// Uplink data with acknowledgment.
+  /// Uplink data with acknowledgment (MHDR bits = `100`).
   ConfirmedDataUp = 0b100,
-  /// Downlink data with acknowledgment.
+  /// Downlink data with acknowledgment (MHDR bits = `101`).
   ConfirmedDataDown = 0b101,
-  /// Rejoin request (`LoRaWAN` 1.1).
+  /// Rejoin request (`LoRaWAN` 1.1 only, MHDR bits = `110`).
   RejoinRequest = 0b110,
-  /// Proprietary message.
+  /// Proprietary message body (MHDR bits = `111`).
   Proprietary = 0b111,
 }
 
@@ -51,6 +85,14 @@ impl MType {
 }
 
 /// Direction of a `LoRaWAN` data frame.
+///
+/// Set automatically when you parse with [`crate::LoraPacket::from_wire`]
+/// (from the `MType`) or when you call [`crate::LoraPacketBuilder::data`].
+/// Read it back on [`crate::Data::direction`].
+///
+/// Direction selects which key is used for `FRMPayload` and `FOpts` crypt
+/// (see [`crate::Data::decrypt_payload`]) and which CMAC block layout is
+/// used for the MIC (see [`crate::LoraPacket::calculate_mic_v1_0`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Direction {
@@ -60,7 +102,19 @@ pub enum Direction {
   Downlink,
 }
 
-/// `LoRaWAN` protocol version used by a particular MIC or crypto operation.
+/// `LoRaWAN` protocol version, used to pick the right MIC and crypto path.
+///
+/// 1.0 and 1.1 use the same AES-CMAC primitive but different key roles, B
+/// blocks, and (for uplinks) a dual-MIC construction. The version is implicit
+/// in which method you call:
+///
+/// - [`crate::LoraPacket::verify_mic_v1_0`] +
+///   [`crate::V1_0MicKeys`] for 1.0.x.
+/// - [`crate::LoraPacket::verify_mic_v1_1`] +
+///   [`crate::V1_1MicKeys`] for 1.1.
+///
+/// This enum is exposed for callers that route or log by version; it does not
+/// itself dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LorawanVersion {
@@ -71,6 +125,20 @@ pub enum LorawanVersion {
 }
 
 /// MHDR byte: 3 bits `MType`, 3 bits RFU, 2 bits Major.
+///
+/// Wraps the leading byte of every `PHYPayload`. Build with
+/// [`Mhdr::from_parts`] or wrap an existing byte with [`Mhdr::new`].
+///
+/// # Examples
+///
+/// ```
+/// use lora_packet::{Mhdr, MType};
+///
+/// let m = Mhdr::from_parts(MType::UnconfirmedDataUp, 0);
+/// assert_eq!(m.as_byte(), 0x40);
+/// assert_eq!(m.m_type().unwrap(), MType::UnconfirmedDataUp);
+/// assert_eq!(m.major(), 0);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Mhdr(pub u8);
@@ -114,6 +182,17 @@ impl Mhdr {
 /// - Bit 5: ACK
 /// - Bit 4: `ClassB` (uplink) / `FPending` (downlink)
 /// - Bits 3..0: `FOptsLen`
+///
+/// # Examples
+///
+/// ```
+/// use lora_packet::FCtrl;
+///
+/// let c = FCtrl(0b1010_0110);
+/// assert!(c.adr());
+/// assert!(c.ack());
+/// assert_eq!(c.f_opts_len(), 6);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FCtrl(pub u8);
@@ -166,6 +245,10 @@ impl FCtrl {
 /// - Bit 7: `OptNeg` (`LoRaWAN` 1.1 only)
 /// - Bits 6..4: `RX1DRoffset`
 /// - Bits 3..0: `RX2DataRate`
+///
+/// `OptNeg = 1` signals that the device should operate in 1.1 mode
+/// (dual-MIC, separate JS keys, etc.); `OptNeg = 0` keeps the session in
+/// 1.0 compatibility mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DlSettings(pub u8);
@@ -259,32 +342,54 @@ macro_rules! id_newtype {
 
 id_newtype!(
   /// Device address (4 bytes, big-endian display order).
+  ///
+  /// Assigned by the network during join, then carried in every Data frame.
+  /// Wire bytes are little-endian; the struct keeps display order so
+  /// `DevAddr([0x49, 0xBE, 0x7D, 0xF1])` prints as `49be7df1`.
   DevAddr, 4
 );
 id_newtype!(
   /// Device EUI (8 bytes, big-endian display order).
+  ///
+  /// IEEE EUI-64 globally unique device identifier. Carried in Join Request
+  /// and Rejoin Request frames; the network uses it to look up the device.
   DevEui, 8
 );
 id_newtype!(
-  /// Application EUI / Join EUI (8 bytes, big-endian display order).
+  /// Application EUI in `LoRaWAN` 1.0 / Join EUI in 1.1 (8 bytes).
+  ///
+  /// Identifies the Join Server responsible for the device. See alias
+  /// [`JoinEui`].
   AppEui, 8
 );
-/// `LoRaWAN` 1.1 spec alias for `AppEui`.
+/// `LoRaWAN` 1.1 spec alias for [`AppEui`]. The 1.1 spec renamed the field
+/// to `JoinEUI`; the bytes are the same.
 pub use AppEui as JoinEui;
 
 id_newtype!(
   /// Network ID (3 bytes).
+  ///
+  /// Identifies the home network. Carried in Join Accept and in the B0 block
+  /// for some MIC calculations.
   NetId, 3
 );
 id_newtype!(
   /// Device nonce (2 bytes).
+  ///
+  /// Per-join random value generated by the device; used together with
+  /// `AppNonce` for session-key derivation. The device must not reuse a
+  /// `DevNonce` per the spec.
   DevNonce, 2
 );
 id_newtype!(
-  /// Application nonce / Join nonce (3 bytes).
+  /// Application nonce (1.0) / Join nonce (1.1), 3 bytes.
+  ///
+  /// Per-join random value generated by the network. See alias
+  /// [`JoinNonce`].
   AppNonce, 3
 );
-/// `LoRaWAN` 1.1 spec alias for `AppNonce`.
+/// `LoRaWAN` 1.1 spec alias for [`AppNonce`]. The 1.1 spec renamed the field
+/// to `JoinNonce`; the bytes are the same.
 pub use AppNonce as JoinNonce;
 
 /// Internal macro: declare a 16-byte key newtype with redacted Debug,
@@ -408,51 +513,94 @@ const fn hex_nibble(b: u8) -> core::result::Result<u8, &'static str> {
 }
 
 key_newtype!(
-  /// `LoRaWAN` 1.0 root application key.
+  /// Root application key (`LoRaWAN` 1.0; also used for 1.1 `AppSKey`
+  /// derivation).
+  ///
+  /// Provisioned in the device; never sent over the air. In 1.0 it derives
+  /// both `AppSKey` and `NwkSKey` via [`crate::SessionKeys10::derive`]. In
+  /// 1.1 it derives `AppSKey` via [`crate::SessionKeys11::derive`].
   AppKey
 );
 key_newtype!(
-  /// `LoRaWAN` 1.1 root network key.
+  /// Root network key (`LoRaWAN` 1.1).
+  ///
+  /// Provisioned in the device; never sent over the air. Used to derive
+  /// `FNwkSIntKey`, `SNwkSIntKey`, `NwkSEncKey`, `JSIntKey`, and `JSEncKey`.
+  /// Pass to [`crate::SessionKeys11::derive`] and
+  /// [`crate::JoinServerKeys::derive`].
   NwkKey
 );
 key_newtype!(
-  /// Application session key (`FRMPayload` crypt with `FPort` > 0).
+  /// Application session key.
+  ///
+  /// Used to encrypt and decrypt `FRMPayload` when `FPort > 0` (the common
+  /// case for application data). See [`crate::Data::decrypt_payload`].
   AppSKey
 );
 key_newtype!(
-  /// Network session key (1.0; `FRMPayload` crypt with `FPort` = 0 and MIC).
+  /// Network session key (`LoRaWAN` 1.0).
+  ///
+  /// Used for:
+  /// - Data MIC computation (see [`crate::LoraPacket::verify_mic_v1_0`]).
+  /// - `FRMPayload` crypt when `FPort = 0` (MAC commands in `FRMPayload`).
+  ///
+  /// In 1.1, the equivalent roles split into `FNwkSIntKey`, `SNwkSIntKey`,
+  /// and `NwkSEncKey`.
   NwkSKey
 );
 key_newtype!(
-  /// Forwarding network session integrity key (1.1 uplink MIC).
+  /// Forwarding network session integrity key (`LoRaWAN` 1.1).
+  ///
+  /// Computes the lower 2 bytes of the dual-MIC for uplink Data frames.
+  /// See [`crate::V1_1MicKeys`].
   FNwkSIntKey
 );
 key_newtype!(
-  /// Serving network session integrity key (1.1).
+  /// Serving network session integrity key (`LoRaWAN` 1.1).
+  ///
+  /// Computes the upper 2 bytes of the uplink dual-MIC and the full
+  /// downlink MIC; also used for Rejoin types 0 and 2.
   SNwkSIntKey
 );
 key_newtype!(
-  /// Network session encryption key (1.1 `FOpts` crypt).
+  /// Network session encryption key (`LoRaWAN` 1.1).
+  ///
+  /// Encrypts `FOpts` MAC commands and `FRMPayload` with `FPort = 0`.
+  /// See [`crate::Data::encrypt_fopts`].
   NwkSEncKey
 );
 key_newtype!(
-  /// Join Server integrity key (1.1).
+  /// Join Server integrity key (`LoRaWAN` 1.1).
+  ///
+  /// MIC key for Join Accept and Rejoin Type 1. Derived from `NwkKey` and
+  /// `DevEui` via [`crate::JoinServerKeys::derive`].
   JSIntKey
 );
 key_newtype!(
-  /// Join Server encryption key (1.1).
+  /// Join Server encryption key (`LoRaWAN` 1.1).
+  ///
+  /// Re-encrypts the Join Accept body sent to a rejoining device. Derived
+  /// from `NwkKey` and `DevEui` via [`crate::JoinServerKeys::derive`].
   JSEncKey
 );
 key_newtype!(
-  /// Root WOR / Relay session key.
+  /// Root key for Relay / Wake-On-Radio (WOR) sessions.
+  ///
+  /// Derived from `NwkSKey` via [`crate::WorKeys::root`]. Pass to
+  /// [`crate::WorKeys::session`] together with a `DevAddr` to produce a
+  /// `WorSessionKeys` pair.
   RootWorSKey
 );
 key_newtype!(
   /// WOR session integrity key.
+  ///
+  /// One half of the pair produced by [`crate::WorKeys::session`].
   WorSIntKey
 );
 key_newtype!(
   /// WOR session encryption key.
+  ///
+  /// One half of the pair produced by [`crate::WorKeys::session`].
   WorSEncKey
 );
 

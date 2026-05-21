@@ -1,5 +1,20 @@
-//! AES-ECB primitives, `FRMPayload`/`FOpts` crypt, Join Accept crypt, and
-//! session/JS/WOR key derivation.
+//! AES-ECB primitives, `FRMPayload` and `FOpts` crypt, Join Accept crypt,
+//! and OTAA / Join Server / WOR key derivation.
+//!
+//! Three layers in this module:
+//!
+//! 1. **Low-level AES-128 block primitive**: [`aes_ecb_encrypt`]. Use this
+//!    when you need raw AES (testing, protocol experiments). Most code
+//!    should reach for a higher-level helper instead.
+//! 2. **Per-frame crypt**: [`crate::Data::decrypt_payload`] /
+//!    [`crate::Data::encrypt_payload`] for `FRMPayload`,
+//!    [`crate::Data::decrypt_fopts`] / [`crate::Data::encrypt_fopts`] for
+//!    1.1 MAC commands in `FOpts`, and [`crate::JoinAccept::decrypt_from_wire`]
+//!    / [`crate::JoinAccept::encrypt_for_wire`] for Join Accept frames.
+//! 3. **Key derivation**: [`SessionKeys10::derive`] /
+//!    [`SessionKeys11::derive`] for OTAA session keys, [`JoinServerKeys::derive`]
+//!    for 1.1 JS keys, and [`WorKeys::root`] / [`WorKeys::session`] for
+//!    Relay (WOR) keys.
 
 use aes::Aes128;
 use aes::cipher::{Array, BlockCipherDecrypt, BlockCipherEncrypt, KeyInit};
@@ -9,7 +24,35 @@ use crate::types::{
   NwkSEncKey, NwkSKey, RootWorSKey, SNwkSIntKey, WorSEncKey, WorSIntKey,
 };
 
-/// Encrypt one 16-byte block under AES-128 ECB. The low-level primitive.
+/// Encrypt one 16-byte block under AES-128 ECB.
+///
+/// The low-level primitive every other crypto helper in this crate is
+/// built on. Exposed for raw protocol work and for parity with the TS
+/// reference's `encrypt(buffer, key)` helper.
+///
+/// # Examples
+///
+/// NIST FIPS-197 Appendix B test vector:
+///
+/// ```
+/// use lora_packet::aes_ecb_encrypt;
+///
+/// let key = [
+///   0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+///   0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c,
+/// ];
+/// let plain = [
+///   0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d,
+///   0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34,
+/// ];
+/// assert_eq!(
+///   aes_ecb_encrypt(&plain, &key),
+///   [
+///     0x39, 0x25, 0x84, 0x1d, 0x02, 0xdc, 0x09, 0xfb,
+///     0xdc, 0x11, 0x85, 0x97, 0x19, 0x6a, 0x0b, 0x32,
+///   ],
+/// );
+/// ```
 pub fn aes_ecb_encrypt(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
   let cipher = Aes128::new(&Array::from(*key));
   let mut buf = Array::from(*block);
@@ -17,7 +60,11 @@ pub fn aes_ecb_encrypt(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
   buf.into()
 }
 
-/// Decrypt one 16-byte block under AES-128 ECB. The low-level primitive.
+/// Decrypt one 16-byte block under AES-128 ECB.
+///
+/// Counterpart to [`aes_ecb_encrypt`]. Used internally by
+/// [`crate::JoinAccept::encrypt_for_wire`] (which inverts the AES-ECB
+/// transform applied on-air) and exposed for completeness.
 pub fn aes_ecb_decrypt(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
   let cipher = Aes128::new(&Array::from(*key));
   let mut buf = Array::from(*block);
@@ -26,6 +73,14 @@ pub fn aes_ecb_decrypt(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
 }
 
 /// `LoRaWAN` 1.0 session keys derived during OTAA.
+///
+/// The two keys cover all 1.0 session needs:
+/// - [`AppSKey`] encrypts `FRMPayload` when `FPort > 0`.
+/// - [`NwkSKey`] computes the Data MIC and encrypts `FRMPayload` when
+///   `FPort == 0`.
+///
+/// Build with [`SessionKeys10::derive`] given the device's `AppKey` and the
+/// join exchange's `NetId`, `AppNonce`, and `DevNonce`.
 #[derive(Debug, Clone)]
 pub struct SessionKeys10 {
   /// Application session key.
@@ -36,6 +91,10 @@ pub struct SessionKeys10 {
 
 impl SessionKeys10 {
   /// Derive `AppSKey` and `NwkSKey` from the OTAA root key and join nonces.
+  ///
+  /// The derivation is `AES-ECB-encrypt(AppKey, 0x0?  || AppNonce_LE ||
+  /// NetID_LE || DevNonce_LE || padding)` with `0x01` for `NwkSKey` and
+  /// `0x02` for `AppSKey`.
   ///
   /// # Examples
   ///
@@ -84,20 +143,32 @@ fn derive_session_key_10(
 }
 
 /// `LoRaWAN` 1.1 session keys derived during OTAA.
+///
+/// 1.1 splits the 1.0 `NwkSKey` into three role-specific keys
+/// (`FNwkSIntKey`, `SNwkSIntKey`, `NwkSEncKey`) plus keeps the application
+/// session key. See [`crate::V1_1MicKeys`] for how they slot into MIC
+/// computation.
 #[derive(Debug, Clone)]
 pub struct SessionKeys11 {
-  /// Application session key (`FRMPayload` crypt with `FPort` > 0).
+  /// Application session key (`FRMPayload` crypt with `FPort > 0`).
   pub app_s_key: AppSKey,
-  /// Forwarding network session integrity key (uplink MIC, first 2 bytes).
+  /// Forwarding network session integrity key (lower 2 MIC bytes for
+  /// uplink Data frames).
   pub f_nwk_s_int_key: FNwkSIntKey,
-  /// Serving network session integrity key (uplink + downlink MIC).
+  /// Serving network session integrity key (upper 2 MIC bytes for uplinks,
+  /// full MIC for downlinks).
   pub s_nwk_s_int_key: SNwkSIntKey,
-  /// Network session encryption key (`FOpts` and `FRMPayload` with `FPort` = 0).
+  /// Network session encryption key (`FOpts` MAC commands, plus
+  /// `FRMPayload` when `FPort == 0`).
   pub nwk_s_enc_key: NwkSEncKey,
 }
 
 impl SessionKeys11 {
   /// Derive all four 1.1 session keys.
+  ///
+  /// `AppSKey` is derived from `AppKey`; the three network keys are
+  /// derived from `NwkKey`. Inputs include `JoinEUI` because 1.1 binds the
+  /// session to the join server identity.
   ///
   /// # Examples
   ///
@@ -180,17 +251,32 @@ fn derive_session_key_11(
   aes_ecb_encrypt(&block, key)
 }
 
-/// Join Server keys derived from `NwkKey` and `DevEUI`.
+/// Join Server keys (`LoRaWAN` 1.1) derived from `NwkKey` and `DevEUI`.
+///
+/// Used by the Join Server (not the device) for Rejoin-aware Join Accept
+/// signing and re-encryption. Pair of keys; see [`JoinServerKeys::derive`].
 #[derive(Debug, Clone)]
 pub struct JoinServerKeys {
-  /// Integrity key for Join Server operations.
+  /// Integrity key for Join Accept and Rejoin Type 1 MIC.
   pub js_int_key: JSIntKey,
-  /// Encryption key for Join Server operations.
+  /// Encryption key for re-encrypting Join Accept bodies sent to rejoining
+  /// devices.
   pub js_enc_key: JSEncKey,
 }
 
 impl JoinServerKeys {
-  /// Derive both JS keys.
+  /// Derive both JS keys from `NwkKey` and `DevEUI`.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lora_packet::{JoinServerKeys, NwkKey, DevEui};
+  ///
+  /// let nwk_key = NwkKey::new([0x42u8; 16]);
+  /// let dev_eui = DevEui::new([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
+  /// let js = JoinServerKeys::derive(&nwk_key, &dev_eui);
+  /// assert_ne!(js.js_int_key.as_bytes(), js.js_enc_key.as_bytes());
+  /// ```
   #[allow(clippy::trivially_copy_pass_by_ref)]
   pub fn derive(nwk_key: &NwkKey, dev_eui: &DevEui) -> Self {
     let mut block = [0u8; 16];
@@ -205,7 +291,11 @@ impl JoinServerKeys {
   }
 }
 
-/// Relay (WOR) session keys derived from `RootWorSKey` and `DevAddr`.
+/// Relay (Wake-On-Radio) session keys derived from a `RootWorSKey` and
+/// `DevAddr`.
+///
+/// Two keys per relay session: integrity (MIC) and encryption. Build with
+/// [`WorKeys::session`].
 #[derive(Debug, Clone)]
 pub struct WorSessionKeys {
   /// WOR session integrity key.
@@ -214,11 +304,29 @@ pub struct WorSessionKeys {
   pub wor_s_enc_key: WorSEncKey,
 }
 
-/// Namespace for Relay/WOR key derivation.
+/// Namespace for Relay / Wake-On-Radio key derivation.
+///
+/// A unit struct that groups [`WorKeys::root`] and [`WorKeys::session`]
+/// without polluting the crate root.
+///
+/// # Examples
+///
+/// Derive a root WOR key then a session pair:
+///
+/// ```
+/// use lora_packet::{WorKeys, NwkSKey, DevAddr};
+///
+/// let nwk_s_key = NwkSKey::new([0u8; 16]);
+/// let root = WorKeys::root(&nwk_s_key);
+/// let session = WorKeys::session(&root, &DevAddr::new([0x01, 0x02, 0x03, 0x04]));
+/// assert_ne!(session.wor_s_int_key.as_bytes(), session.wor_s_enc_key.as_bytes());
+/// ```
 pub struct WorKeys;
 
 impl WorKeys {
   /// Derive `RootWorSKey` from `NwkSKey`.
+  ///
+  /// `RootWorSKey = AES-ECB-encrypt(NwkSKey, 0x01 || 0x00..)`.
   pub fn root(nwk_s_key: &NwkSKey) -> RootWorSKey {
     let mut block = [0u8; 16];
     block[0] = 0x01;
@@ -226,6 +334,10 @@ impl WorKeys {
   }
 
   /// Derive WOR session keys from a root key and `DevAddr`.
+  ///
+  /// Two AES-ECB blocks under the root, with the first byte set to 0x01
+  /// for the integrity key and 0x02 for the encryption key. The remainder
+  /// is `DevAddr_LE` padded with zeros.
   #[allow(clippy::trivially_copy_pass_by_ref)]
   pub fn session(root: &RootWorSKey, dev_addr: &DevAddr) -> WorSessionKeys {
     let mut block = [0u8; 16];
@@ -244,25 +356,33 @@ impl WorKeys {
 }
 
 impl crate::codec::Data {
-  /// Encrypt or decrypt `FRMPayload`. The XOR keystream construction makes
-  /// the same operation work in both directions.
+  /// Decrypt `FRMPayload`.
   ///
-  /// Selects `NwkSKey` when `FPort == 0`, `AppSKey` otherwise.
+  /// `LoRaWAN` uses an AES-CTR-like keystream so the same operation works
+  /// in both directions; this method is named for the typical use (receiver
+  /// side). The key is selected by `FPort`:
+  /// - `FPort == 0`: `NwkSKey` (MAC commands in `FRMPayload`).
+  /// - `FPort  > 0`: `AppSKey` (application data).
+  ///
+  /// `f_cnt_msb` is the upper 16 bits of the 32-bit `FCnt`; pass `0` if
+  /// frame counters never wrap. See [`crate::Data::f_cnt_32`].
   ///
   /// # Errors
-  /// Currently infallible (returns `Result` for forward compatibility).
+  /// [`crate::Error::PayloadTooLarge`] if the ciphertext exceeds the
+  /// AES-CTR block-index limit (255 blocks = 4080 bytes).
   ///
   /// # Examples
   ///
   /// ```
   /// use lora_packet::{LoraPacket, AppSKey, NwkSKey};
   ///
-  /// let bytes = hex::decode("40f17dbe4900020001954378762b11ff0d").unwrap();
-  /// let packet = LoraPacket::from_wire(&bytes).unwrap();
-  /// let app_s_key = AppSKey::from_slice(&hex::decode("ec925802ae430ca77fd3dd73cb2cc588").unwrap()).unwrap();
-  /// let nwk_s_key = NwkSKey::from_slice(&hex::decode("44024241ed4ce9a68c6a8bc055233fd3").unwrap()).unwrap();
-  /// let plain = packet.as_data().unwrap().decrypt_payload(&app_s_key, &nwk_s_key, 0).unwrap();
+  /// let bytes = hex::decode("40f17dbe4900020001954378762b11ff0d")?;
+  /// let packet = LoraPacket::from_wire(&bytes)?;
+  /// let app_s_key = AppSKey::from_slice(&hex::decode("ec925802ae430ca77fd3dd73cb2cc588")?)?;
+  /// let nwk_s_key = NwkSKey::from_slice(&hex::decode("44024241ed4ce9a68c6a8bc055233fd3")?)?;
+  /// let plain = packet.as_data().unwrap().decrypt_payload(&app_s_key, &nwk_s_key, 0)?;
   /// assert_eq!(&plain, b"test");
+  /// # Ok::<(), Box<dyn std::error::Error>>(())
   /// ```
   pub fn decrypt_payload(
     &self,
@@ -281,10 +401,17 @@ impl crate::codec::Data {
 
   /// Encrypt the given plaintext under the `FRMPayload` keystream.
   ///
+  /// Same primitive as [`Self::decrypt_payload`]; named differently for
+  /// clarity at call sites. Used by
+  /// [`crate::LoraPacketBuilder::sign_and_encrypt`] for downlink building.
+  ///
   /// Selects `NwkSKey` when `FPort == 0`, `AppSKey` otherwise.
   ///
   /// # Errors
-  /// `Error::PayloadTooLarge` if the plaintext exceeds 4080 bytes (255 AES blocks).
+  /// [`crate::Error::PayloadTooLarge`] if the plaintext exceeds 4080 bytes
+  /// (255 AES blocks). Beyond this, the 1-byte block counter in the `Ai`
+  /// keystream block overflows and silently produces ciphertext no other
+  /// `LoRaWAN` stack can decrypt.
   pub fn encrypt_payload(
     &self,
     plaintext: &[u8],
@@ -338,13 +465,17 @@ fn payload_crypt(
 impl crate::codec::Data {
   /// Decrypt `FOpts` MAC commands (`LoRaWAN` 1.1 only).
   ///
-  /// Uses the keystream layout from the official `LoRa` Alliance errata
-  /// "`FCntDwn` Usage in `FOpts` Encryption" (CR v2 r1). When the frame is a
-  /// downlink with `FPort` > 0 the `aFCntDown` flag selects byte 4 = 0x02;
-  /// otherwise it is 0x01.
+  /// In 1.0, `FOpts` is plaintext on the wire; this method is a no-op
+  /// (but still callable). In 1.1, `FOpts` is encrypted under
+  /// `NwkSEncKey` with a single AES-ECB block.
+  ///
+  /// Uses the keystream layout from the `LoRa` Alliance errata
+  /// "`FCntDwn` Usage in `FOpts` Encryption" (CR v2 r1): when the frame is
+  /// a downlink with `FPort > 0` the `aFCntDown` flag selects byte 4 =
+  /// 0x02; otherwise it is 0x01.
   ///
   /// # Errors
-  /// Currently infallible.
+  /// Currently infallible; returns `Result` for forward compatibility.
   pub fn decrypt_fopts(
     &self,
     nwk_s_enc_key: &crate::types::NwkSEncKey,
@@ -362,8 +493,12 @@ impl crate::codec::Data {
 
   /// Encrypt `FOpts` MAC commands (`LoRaWAN` 1.1 only).
   ///
+  /// Symmetric to [`Self::decrypt_fopts`]; same primitive in both
+  /// directions. Use when building a 1.1 frame that carries MAC commands
+  /// in `FOpts`.
+  ///
   /// # Errors
-  /// Currently infallible.
+  /// Currently infallible; returns `Result` for forward compatibility.
   pub fn encrypt_fopts(
     &self,
     nwk_s_enc_key: &crate::types::NwkSEncKey,
@@ -381,23 +516,49 @@ impl crate::codec::Data {
 }
 
 impl crate::codec::JoinAccept {
-  /// Decrypt a wire-format Join Accept (`MHDR` + ciphertext body + MIC).
+  /// Decrypt a wire-format Join Accept (`MHDR` + ciphertext body + MIC) on
+  /// the device side.
   ///
-  /// On-air the device applies AES-ECB-encrypt to undo the server's
-  /// AES-ECB-decrypt; the MHDR passes through unchanged. The total length
-  /// must be 17 (one block) or 33 (two blocks).
+  /// `LoRaWAN` Join Accept uses an unusual trick: the server applies
+  /// AES-ECB-*decrypt* to the body so that the device can use only the
+  /// AES-ECB-*encrypt* primitive (smaller code on constrained MCUs). This
+  /// helper inverts that: encrypt on the device side gives back the
+  /// plaintext bytes.
+  ///
+  /// The MHDR (first byte) passes through unchanged. The total length
+  /// must be 17 (one block, no `CFList`) or 33 (two blocks, with `CFList`).
   ///
   /// # Errors
-  /// `Error::InvalidJoinAcceptLength` when the total length is outside {17, 33}.
+  /// [`crate::Error::InvalidJoinAcceptLength`] when the total length is
+  /// outside `{17, 33}`.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lora_packet::{JoinAccept, AppKey};
+  ///
+  /// let app_key = AppKey::new([0u8; 16]);
+  /// let encrypted = hex::decode("20e3de108795f776b8037610ef7869b5b3")?;
+  /// let plaintext = JoinAccept::decrypt_from_wire(&encrypted, &app_key)?;
+  /// // plaintext is now MHDR || JoinAcceptBody || MIC
+  /// assert_eq!(plaintext.len(), 17);
+  /// # Ok::<(), Box<dyn std::error::Error>>(())
+  /// ```
   pub fn decrypt_from_wire(ciphertext: &[u8], app_key: &AppKey) -> crate::Result<alloc::vec::Vec<u8>> {
     join_accept_transform(ciphertext, app_key, aes_ecb_encrypt)
   }
 
-  /// Encrypt a plaintext Join Accept (server-side AES-ECB-decrypt of the
-  /// body); the MHDR is left as-is.
+  /// Encrypt a plaintext Join Accept on the server side.
+  ///
+  /// Applies AES-ECB-decrypt to the body (the inverse of what
+  /// [`Self::decrypt_from_wire`] does on the device). The MHDR is left
+  /// as-is. Use when assembling a Join Accept to send to a device.
+  ///
+  /// The total length must be 17 (one block) or 33 (two blocks).
   ///
   /// # Errors
-  /// `Error::InvalidJoinAcceptLength` when the total length is outside {17, 33}.
+  /// [`crate::Error::InvalidJoinAcceptLength`] when the total length is
+  /// outside `{17, 33}`.
   pub fn encrypt_for_wire(plaintext: &[u8], app_key: &AppKey) -> crate::Result<alloc::vec::Vec<u8>> {
     join_accept_transform(plaintext, app_key, aes_ecb_decrypt)
   }

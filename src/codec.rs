@@ -1,6 +1,18 @@
 //! Wire-format codec for `LoRaWAN` packets.
 //!
-//! Parsing (`from_wire`), building (`builder()` / `to_wire`), and accessors.
+//! Two halves to the API:
+//!
+//! - **Parsing**: [`LoraPacket::from_wire`] takes raw bytes and returns a
+//!   typed [`LoraPacket`]. Match on [`LoraPacket::payload`] (a [`Payload`]
+//!   enum) to dispatch on the message variant.
+//! - **Building**: [`LoraPacket::builder`] returns a [`LoraPacketBuilder`]
+//!   that finalises with [`LoraPacketBuilder::sign_and_encrypt`] (Data),
+//!   [`LoraPacketBuilder::sign_join_request`] (Join Request 1.0),
+//!   [`LoraPacketBuilder::sign_join_request_v1_1`] (Join Request 1.1), or
+//!   [`LoraPacketBuilder::sign_join_accept`] (Join Accept).
+//!
+//! All wire bytes are little-endian; struct fields display in big-endian
+//! order. The codec reverses bytes for you on both parse and serialise.
 
 use alloc::vec::Vec;
 
@@ -9,96 +21,177 @@ use crate::types::{AppEui, AppNonce, DevAddr, DevEui, DevNonce, Direction, DlSet
 /// A `LoRaWAN` `PHYPayload`, parsed into structured fields.
 ///
 /// `LoraPacket` is always exactly one of the five message types described by
-/// `Payload`. The variant carries every field that is meaningful for that
+/// [`Payload`]. The variant carries every field that is meaningful for that
 /// message type; fields that do not apply are not representable.
+///
+/// Construct from wire bytes with [`from_wire`](Self::from_wire), or compose
+/// from fields with [`builder`](Self::builder).
+///
+/// # Examples
+///
+/// Parse and dispatch on the message variant:
+///
+/// ```
+/// use lora_packet::{LoraPacket, Payload};
+///
+/// let bytes = hex::decode("40f17dbe4900020001954378762b11ff0d")?;
+/// let packet = LoraPacket::from_wire(&bytes)?;
+///
+/// match &packet.payload {
+///   Payload::Data(d) => {
+///     assert_eq!(d.dev_addr.as_bytes(), &[0x49, 0xbe, 0x7d, 0xf1]);
+///     assert_eq!(d.f_cnt(), 2);
+///   }
+///   Payload::JoinRequest(_) => unreachable!(),
+///   Payload::JoinAccept(_) => unreachable!(),
+///   Payload::RejoinRequest(_) => unreachable!(),
+///   Payload::Proprietary(_) => unreachable!(),
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LoraPacket {
   /// Full wire bytes (MHDR + `MACPayload` + MIC).
+  ///
+  /// Kept around so that MIC re-computation does not need to re-serialise.
+  /// [`to_wire`](Self::to_wire) rebuilds these bytes from the typed fields.
   pub phy_payload: Vec<u8>,
   /// MAC header byte.
   pub mhdr: Mhdr,
-  /// 4-byte message integrity code.
+  /// 4-byte message integrity code (the last 4 bytes of `phy_payload`).
   pub mic: [u8; 4],
-  /// Type-specific payload fields.
+  /// Type-specific payload fields. See [`Payload`].
   pub payload: Payload,
 }
 
-/// Discriminated union over `LoRaWAN` message variants.
+/// Discriminated union over the five `LoRaWAN` message variants.
+///
+/// The variant is always determined by [`LoraPacket::m_type`] / the MHDR.
+/// Use the [`LoraPacket::as_data`] / [`LoraPacket::as_join_request`]
+/// helpers when you want to peek without an exhaustive match.
+///
+/// # Examples
+///
+/// ```
+/// use lora_packet::{LoraPacket, Payload};
+///
+/// let bytes = hex::decode("0039363463336913aa05693574323831338ef1c1d5ec6c")?;
+/// let packet = LoraPacket::from_wire(&bytes)?;
+///
+/// if let Payload::JoinRequest(jr) = &packet.payload {
+///   assert_eq!(jr.dev_nonce.as_bytes(), &[0xf1, 0x8e]);
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Payload {
-  /// OTAA join request.
+  /// OTAA Join Request.
   JoinRequest(JoinRequest),
-  /// Server-issued join accept.
+  /// Server-issued Join Accept (plaintext fields; the wire form is encrypted).
   JoinAccept(JoinAccept),
-  /// Confirmed or unconfirmed data, uplink or downlink.
+  /// Confirmed or unconfirmed Data frame, uplink or downlink.
   Data(Data),
-  /// `LoRaWAN` 1.1 rejoin request (any of 3 types).
+  /// `LoRaWAN` 1.1 Rejoin Request (one of three types).
   RejoinRequest(RejoinRequest),
-  /// Proprietary message body.
+  /// Proprietary message body (opaque bytes).
   Proprietary(Vec<u8>),
 }
 
 /// Fields of an OTAA Join Request.
+///
+/// Returned by [`LoraPacket::from_wire`] when the MHDR indicates
+/// [`MType::JoinRequest`]; the MIC is verified separately with
+/// [`LoraPacket::verify_mic_v1_0`] (using `AppKey`) or
+/// [`LoraPacket::verify_mic_v1_1`] (using `NwkKey`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct JoinRequest {
-  /// Join EUI (`LoRaWAN` 1.1 spec name for `AppEUI`).
+  /// Join EUI (`AppEUI` in 1.0 nomenclature, `JoinEUI` in 1.1).
   pub join_eui: AppEui,
-  /// Device EUI.
+  /// Device EUI (IEEE EUI-64).
   pub dev_eui: DevEui,
-  /// Device-generated nonce.
+  /// Device-generated random nonce; must not repeat per the spec.
   pub dev_nonce: DevNonce,
 }
 
 /// Fields of a Join Accept (plaintext, after decrypt).
+///
+/// On the wire, the body of a Join Accept is AES-ECB encrypted. Use
+/// [`JoinAccept::decrypt_from_wire`] to turn wire bytes into this struct,
+/// or [`JoinAccept::encrypt_for_wire`] to go the other direction (server
+/// side).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct JoinAccept {
-  /// Server-generated nonce.
+  /// Server-generated random nonce (`AppNonce` in 1.0, `JoinNonce` in 1.1).
   pub join_nonce: AppNonce,
   /// Network ID.
   pub net_id: NetId,
-  /// Assigned device address.
+  /// `DevAddr` assigned to the device.
   pub dev_addr: DevAddr,
   /// Downlink settings (RX1 offset, RX2 data rate, `OptNeg`).
   pub dl_settings: DlSettings,
-  /// RX1 delay in seconds.
+  /// RX1 delay, in seconds.
   pub rx_delay: u8,
-  /// Optional channel frequency list (16 bytes).
+  /// Optional Channel-Frequency List (16 bytes); only present in some
+  /// regional plans.
   pub cf_list: Option<[u8; 16]>,
-  /// `LoRaWAN` 1.1 only: rejoin/join-request distinguisher.
+  /// 1.1 only: `JoinReqType` byte threaded into the 1.1 Join Accept MIC.
+  /// `None` on parsed packets; set explicitly when re-signing a 1.1 frame.
   pub join_req_type: Option<u8>,
 }
 
-/// Fields of a Data message (confirmed/unconfirmed, uplink/downlink).
+/// Fields of a Data message (confirmed or unconfirmed, uplink or downlink).
+///
+/// `FRMPayload` is encrypted on the wire; call
+/// [`Data::decrypt_payload`] to recover the plaintext. MAC commands in
+/// `FOpts` are encrypted only in `LoRaWAN` 1.1; call
+/// [`Data::decrypt_fopts`] when applicable.
+///
+/// # Frame counters
+///
+/// The wire carries only the lower 16 bits of the 32-bit `FCnt`. The caller
+/// tracks the upper 16 bits and passes it to [`Data::f_cnt_32`] and to
+/// every crypt / MIC call. Pass `0` for sessions that never wrap.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Data {
-  /// Direction inferred from `MType`.
+  /// Frame direction, inferred from `MType`.
   pub direction: Direction,
   /// `true` for `ConfirmedData{Up,Down}`.
   pub confirmed: bool,
   /// Device address.
   pub dev_addr: DevAddr,
-  /// Frame control byte.
+  /// Frame-control byte.
   pub f_ctrl: FCtrl,
-  /// Wire bytes for the lower 16 bits of `FCnt` (caller tracks the upper 16).
+  /// Lower 16 bits of `FCnt` as on the wire (little-endian).
+  ///
+  /// Use [`Data::f_cnt`] for a `u16` value or [`Data::f_cnt_32`] for the
+  /// full 32-bit counter with a caller-supplied upper half.
   pub f_cnt: [u8; 2],
-  /// MAC commands carried in `FOpts` (empty when none).
+  /// MAC commands carried in `FOpts` (empty when none); up to 15 bytes.
+  /// Encrypted with `NwkSEncKey` in 1.1; plaintext in 1.0.
   pub f_opts: Vec<u8>,
-  /// `FPort` byte (0 = MAC commands in `FRMPayload`; >0 = application data).
+  /// `FPort` byte. `Some(0)` means `FRMPayload` carries MAC commands;
+  /// `Some(p)` with `p > 0` means application data; `None` when neither
+  /// `FPort` nor `FRMPayload` is present.
   pub f_port: Option<u8>,
-  /// Encrypted or plaintext payload (encrypted on the wire; plaintext post-decrypt).
+  /// `FRMPayload`. Encrypted on the wire; replace with plaintext after
+  /// [`Data::decrypt_payload`].
   pub frm_payload: Option<Vec<u8>>,
 }
 
 /// Rejoin Request body (`LoRaWAN` 1.1).
+///
+/// Type 0/2 trigger a rejoin to the same network; type 1 triggers a rejoin
+/// to a different `JoinEUI` (a roaming hand-off). Each type uses a different
+/// MIC key (see [`LoraPacket::calculate_mic_v1_1`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RejoinRequest {
-  /// Type 0: `NetID` + `DevEUI` + `RJCount0`.
+  /// Type 0: `NetID || DevEUI || RJCount0`. MIC key: `SNwkSIntKey`.
   Type0 {
     /// Network ID.
     net_id: NetId,
@@ -107,7 +200,7 @@ pub enum RejoinRequest {
     /// Rejoin counter 0.
     rj_count_0: [u8; 2],
   },
-  /// Type 1: `JoinEUI` + `DevEUI` + `RJCount1`.
+  /// Type 1: `JoinEUI || DevEUI || RJCount1`. MIC key: `JSIntKey`.
   Type1 {
     /// Join EUI.
     join_eui: AppEui,
@@ -116,7 +209,7 @@ pub enum RejoinRequest {
     /// Rejoin counter 1.
     rj_count_1: [u8; 2],
   },
-  /// Type 2: `NetID` + `DevEUI` + `RJCount0`.
+  /// Type 2: `NetID || DevEUI || RJCount0`. MIC key: `SNwkSIntKey`.
   Type2 {
     /// Network ID.
     net_id: NetId,
@@ -140,32 +233,32 @@ impl LoraPacket {
     self.mhdr.m_type().expect("LoraPacket MHDR always has a valid MType")
   }
 
-  /// True for `ConfirmedData`/`UnconfirmedData` (up or down).
+  /// `true` for any data frame (confirmed or unconfirmed, uplink or downlink).
   pub const fn is_data(&self) -> bool {
     matches!(self.payload, Payload::Data(_))
   }
 
-  /// True for `ConfirmedDataUp` or `ConfirmedDataDown`.
+  /// `true` for `ConfirmedDataUp` or `ConfirmedDataDown`.
   pub fn is_confirmed(&self) -> bool {
     matches!(self.m_type(), MType::ConfirmedDataUp | MType::ConfirmedDataDown)
   }
 
-  /// True for Join Request.
+  /// `true` for Join Request.
   pub const fn is_join_request(&self) -> bool {
     matches!(self.payload, Payload::JoinRequest(_))
   }
 
-  /// True for Join Accept.
+  /// `true` for Join Accept.
   pub const fn is_join_accept(&self) -> bool {
     matches!(self.payload, Payload::JoinAccept(_))
   }
 
-  /// True for Rejoin Request.
+  /// `true` for Rejoin Request.
   pub const fn is_rejoin_request(&self) -> bool {
     matches!(self.payload, Payload::RejoinRequest(_))
   }
 
-  /// Borrow as `Data` if this is a data message.
+  /// Borrow as [`Data`] if this is a data frame, else `None`.
   pub const fn as_data(&self) -> Option<&Data> {
     if let Payload::Data(d) = &self.payload {
       Some(d)
@@ -174,7 +267,7 @@ impl LoraPacket {
     }
   }
 
-  /// Mutably borrow as `Data` if this is a data message.
+  /// Mutably borrow as [`Data`] if this is a data frame.
   pub const fn as_data_mut(&mut self) -> Option<&mut Data> {
     if let Payload::Data(d) = &mut self.payload {
       Some(d)
@@ -183,7 +276,7 @@ impl LoraPacket {
     }
   }
 
-  /// Borrow as `JoinRequest` if applicable.
+  /// Borrow as [`JoinRequest`] if applicable, else `None`.
   pub const fn as_join_request(&self) -> Option<&JoinRequest> {
     if let Payload::JoinRequest(j) = &self.payload {
       Some(j)
@@ -192,7 +285,7 @@ impl LoraPacket {
     }
   }
 
-  /// Borrow as `JoinAccept` if applicable.
+  /// Borrow as [`JoinAccept`] if applicable, else `None`.
   pub const fn as_join_accept(&self) -> Option<&JoinAccept> {
     if let Payload::JoinAccept(j) = &self.payload {
       Some(j)
@@ -201,7 +294,7 @@ impl LoraPacket {
     }
   }
 
-  /// Borrow as `RejoinRequest` if applicable.
+  /// Borrow as [`RejoinRequest`] if applicable, else `None`.
   pub const fn as_rejoin_request(&self) -> Option<&RejoinRequest> {
     if let Payload::RejoinRequest(r) = &self.payload {
       Some(r)
@@ -212,8 +305,27 @@ impl LoraPacket {
 
   /// Verify the MIC using the `LoRaWAN` 1.0 key set.
   ///
+  /// Compares against `self.mic` in constant time
+  /// (via `subtle::ConstantTimeEq`). Returns `Ok(true)` on match,
+  /// `Ok(false)` on mismatch, and an error only if a required key is
+  /// missing from `keys`.
+  ///
   /// # Errors
-  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  /// [`crate::Error::MissingKey`] if a required key for the message type is
+  /// not in `keys` (e.g. `nwk_s_key` for a Data frame).
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lora_packet::{LoraPacket, NwkSKey, V1_0MicKeys};
+  ///
+  /// let bytes = hex::decode("40f17dbe4900020001954378762b11ff0d")?;
+  /// let packet = LoraPacket::from_wire(&bytes)?;
+  /// let nwk_s_key = NwkSKey::from_slice(&hex::decode("44024241ed4ce9a68c6a8bc055233fd3")?)?;
+  /// let keys = V1_0MicKeys { nwk_s_key: Some(&nwk_s_key), ..Default::default() };
+  /// assert!(packet.verify_mic_v1_0(&keys)?);
+  /// # Ok::<(), Box<dyn std::error::Error>>(())
+  /// ```
   pub fn verify_mic_v1_0(&self, keys: &crate::mic::V1_0MicKeys<'_>) -> crate::Result<bool> {
     let calculated = self.calculate_mic_v1_0(keys)?;
     Ok(crate::mic::mic_eq(calculated, self.mic))
@@ -221,17 +333,27 @@ impl LoraPacket {
 
   /// Verify the MIC using the `LoRaWAN` 1.1 key set.
   ///
+  /// 1.1 uplinks use a dual-MIC construction with both `FNwkSIntKey` and
+  /// `SNwkSIntKey`; downlinks use `SNwkSIntKey` only. Join Accept frames
+  /// also need `join_eui`, `dev_nonce`, and `join_req_type` in the keyset.
+  ///
   /// # Errors
-  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  /// [`crate::Error::MissingKey`] if a required key for the message type is
+  /// not in `keys`.
   pub fn verify_mic_v1_1(&self, keys: &crate::mic::V1_1MicKeys<'_>) -> crate::Result<bool> {
     let calculated = self.calculate_mic_v1_1(keys)?;
     Ok(crate::mic::mic_eq(calculated, self.mic))
   }
 
-  /// Calculate the MIC under `LoRaWAN` 1.0.
+  /// Calculate the MIC under `LoRaWAN` 1.0 without overwriting `self.mic`.
+  ///
+  /// Useful when you want to compare against an expected value without
+  /// running [`Self::verify_mic_v1_0`], or when you need to record both the
+  /// computed MIC and the received MIC for debugging.
   ///
   /// # Errors
-  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  /// [`crate::Error::MissingKey`] if a required key for the message type is
+  /// not in `keys`.
   pub fn calculate_mic_v1_0(&self, keys: &crate::mic::V1_0MicKeys<'_>) -> crate::Result<[u8; 4]> {
     match &self.payload {
       Payload::Data(_) => {
@@ -259,10 +381,19 @@ impl LoraPacket {
     }
   }
 
-  /// Calculate the MIC under `LoRaWAN` 1.1.
+  /// Calculate the MIC under `LoRaWAN` 1.1 without overwriting `self.mic`.
+  ///
+  /// Dispatches by `MType` and direction:
+  /// - Data uplink: dual-MIC with `FNwkSIntKey` + `SNwkSIntKey`.
+  /// - Data downlink: single MIC with `SNwkSIntKey`.
+  /// - Join Request: `NwkKey`.
+  /// - Join Accept: `JSIntKey` + `JoinEUI` + `DevNonce` + `JoinReqType`.
+  /// - Rejoin Type 1: `JSIntKey`.
+  /// - Rejoin Type 0/2: `SNwkSIntKey`.
   ///
   /// # Errors
-  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  /// [`crate::Error::MissingKey`] if a required key (or context field) for
+  /// the message type is not in `keys`.
   pub fn calculate_mic_v1_1(&self, keys: &crate::mic::V1_1MicKeys<'_>) -> crate::Result<[u8; 4]> {
     match &self.payload {
       Payload::Data(d) => match d.direction {
@@ -342,10 +473,13 @@ impl LoraPacket {
 
   /// Recompute and overwrite the MIC under `LoRaWAN` 1.0.
   ///
-  /// Also rewrites `phy_payload` so it includes the new MIC.
+  /// Also rewrites `phy_payload` so its trailing 4 bytes match the new MIC.
+  /// Use after mutating fields on a parsed packet, or after building an
+  /// unsigned packet you want to sign in place.
   ///
   /// # Errors
-  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  /// [`crate::Error::MissingKey`] if a required key for the message type is
+  /// not in `keys`.
   pub fn recalculate_mic_v1_0(&mut self, keys: &crate::mic::V1_0MicKeys<'_>) -> crate::Result<()> {
     let mic = self.calculate_mic_v1_0(keys)?;
     self.mic = mic;
@@ -355,10 +489,11 @@ impl LoraPacket {
 
   /// Recompute and overwrite the MIC under `LoRaWAN` 1.1.
   ///
-  /// Also rewrites `phy_payload` so it includes the new MIC.
+  /// Also rewrites `phy_payload` so its trailing 4 bytes match the new MIC.
   ///
   /// # Errors
-  /// `Error::MissingKey` if a required key for the message type is not in `keys`.
+  /// [`crate::Error::MissingKey`] if a required key for the message type is
+  /// not in `keys`.
   pub fn recalculate_mic_v1_1(&mut self, keys: &crate::mic::V1_1MicKeys<'_>) -> crate::Result<()> {
     let mic = self.calculate_mic_v1_1(keys)?;
     self.mic = mic;
@@ -369,11 +504,19 @@ impl LoraPacket {
 
 impl Data {
   /// Lower 16 bits of `FCnt` as read from the wire (little-endian).
+  ///
+  /// The wire stores only the bottom 16 bits of the actual 32-bit counter.
+  /// For the full counter use [`Data::f_cnt_32`] together with a
+  /// caller-tracked upper half.
   pub const fn f_cnt(&self) -> u16 {
     u16::from_le_bytes(self.f_cnt)
   }
 
   /// Full 32-bit `FCnt`, combining the wire LSB16 with a caller-tracked MSB16.
+  ///
+  /// `msb` is the upper 16 bits the caller has been tracking. Pass `0` if
+  /// frame counters never wrap in your deployment; otherwise increment
+  /// `msb` each time the wire counter rolls over from `0xFFFF` to `0x0000`.
   pub const fn f_cnt_32(&self, msb: u16) -> u32 {
     ((msb as u32) << 16) | (self.f_cnt() as u32)
   }
@@ -382,19 +525,37 @@ impl Data {
 impl LoraPacket {
   /// Parse a complete `PHYPayload` from wire bytes.
   ///
+  /// This is the primary entry point for inbound traffic. The returned
+  /// [`LoraPacket`] keeps the full wire bytes in
+  /// [`LoraPacket::phy_payload`] so that MIC re-computation is cheap.
+  ///
+  /// Join Accept frames are encrypted on the wire and cannot be parsed
+  /// directly. Use [`JoinAccept::decrypt_from_wire`] first, then either
+  /// pass the result to [`JoinAccept::from_plaintext`] or work with the
+  /// returned plaintext bytes directly.
+  ///
   /// # Errors
-  /// - `Error::TooShort` if the buffer is shorter than the minimum 5 bytes (MHDR + MIC).
-  /// - `Error::InvalidMType` if the MHDR encodes an unknown `MType`.
-  /// - `Error::InvalidRejoinType` if a Rejoin Request has type byte not in {0, 1, 2}.
+  /// - [`crate::Error::TooShort`] if the buffer is shorter than the minimum
+  ///   5 bytes (MHDR + MIC), or shorter than the per-variant minimum.
+  /// - [`crate::Error::InvalidMType`] if the MHDR encodes an unknown
+  ///   `MType` (reserved for forward compatibility).
+  /// - [`crate::Error::InvalidRejoinType`] if a Rejoin Request type byte is
+  ///   not in {0, 1, 2}.
+  /// - [`crate::Error::Other`] for a Join Accept input
+  ///   (Join Accept needs `decrypt_from_wire`).
   ///
   /// # Examples
   ///
   /// ```
-  /// use lora_packet::LoraPacket;
+  /// use lora_packet::{LoraPacket, MType};
   ///
-  /// let bytes = hex::decode("40f17dbe4900020001954378762b11ff0d").unwrap();
-  /// let packet = LoraPacket::from_wire(&bytes).unwrap();
+  /// let bytes = hex::decode("40f17dbe4900020001954378762b11ff0d")?;
+  /// let packet = LoraPacket::from_wire(&bytes)?;
+  ///
   /// assert!(packet.is_data());
+  /// assert_eq!(packet.m_type(), MType::UnconfirmedDataUp);
+  /// assert_eq!(packet.mic, [0x2b, 0x11, 0xff, 0x0d]);
+  /// # Ok::<(), Box<dyn std::error::Error>>(())
   /// ```
   pub fn from_wire(bytes: &[u8]) -> crate::Result<Self> {
     if bytes.len() < 5 {
@@ -432,9 +593,16 @@ impl LoraPacket {
     })
   }
 
-  /// Serialize back to wire bytes.
+  /// Serialise back to wire bytes.
   ///
-  /// Uses `self.mic` as-is. Call a MIC method first if you have keys.
+  /// Re-encodes the typed fields into the little-endian wire layout and
+  /// appends `self.mic` unchanged. Call
+  /// [`recalculate_mic_v1_0`](Self::recalculate_mic_v1_0) /
+  /// [`recalculate_mic_v1_1`](Self::recalculate_mic_v1_1) first if you have
+  /// mutated fields and need a fresh MIC.
+  ///
+  /// For round-trip parsing, the output of `from_wire(bytes).to_wire()`
+  /// equals `bytes` (subject to MIC bytes being preserved).
   pub fn to_wire(&self) -> Vec<u8> {
     let mut out = Vec::with_capacity(self.phy_payload.len().max(13));
     out.push(self.mhdr.as_byte());
@@ -564,11 +732,16 @@ impl LoraPacket {
 impl JoinAccept {
   /// Parse an already-decrypted Join Accept (MHDR + body + MIC).
   ///
-  /// Use `JoinAccept::decrypt_from_wire` (Phase 6) when starting from
-  /// encrypted wire bytes.
+  /// Most callers start with encrypted wire bytes; use
+  /// [`JoinAccept::decrypt_from_wire`] to decrypt first, then pass the
+  /// resulting plaintext bytes here.
+  ///
+  /// Accepts both single-block (17 bytes total) and `CFList` (33 bytes
+  /// total) Join Accept formats.
   ///
   /// # Errors
-  /// `Error::TooShort` if the total length is below 17 or the body is neither 12 nor 28 bytes.
+  /// [`crate::Error::TooShort`] if the total length is below 17 or the body
+  /// length is neither 12 (no `CFList`) nor 28 bytes (with `CFList`).
   pub fn from_plaintext(bytes: &[u8]) -> crate::Result<Self> {
     if bytes.len() < 17 {
       return Err(crate::Error::TooShort {
@@ -697,7 +870,27 @@ fn parse_data(m_type: MType, body: &[u8]) -> crate::Result<Data> {
   })
 }
 
-/// Builder for assembling a `LoraPacket` field-by-field.
+/// Fluent builder for assembling a [`LoraPacket`] field by field.
+///
+/// Pick the message variant first with [`data`](Self::data),
+/// [`join_request`](Self::join_request), [`join_accept`](Self::join_accept),
+/// or [`rejoin_request`](Self::rejoin_request). Then set the per-variant
+/// fields. Finalise with one of:
+///
+/// - [`build_unsigned`](Self::build_unsigned): emit a [`LoraPacket`] with
+///   `mic = [0; 4]`. Sign later by calling
+///   [`recalculate_mic_v1_0`](LoraPacket::recalculate_mic_v1_0) or
+///   [`recalculate_mic_v1_1`](LoraPacket::recalculate_mic_v1_1).
+/// - [`sign_and_encrypt`](Self::sign_and_encrypt): encrypt `FRMPayload` and
+///   compute the 1.0 Data MIC.
+/// - [`sign_join_request`](Self::sign_join_request) /
+///   [`sign_join_request_v1_1`](Self::sign_join_request_v1_1): compute the
+///   Join Request MIC.
+/// - [`sign_join_accept`](Self::sign_join_accept): compute the Join Accept
+///   MIC and encrypt the on-air form.
+///
+/// Every field is optional; required-field validation happens in
+/// `build_unsigned` based on the selected variant.
 #[derive(Debug, Default, Clone)]
 pub struct LoraPacketBuilder {
   m_type: Option<MType>,
@@ -725,7 +918,12 @@ pub struct LoraPacketBuilder {
 impl LoraPacket {
   /// Begin building a packet field by field.
   ///
+  /// See [`LoraPacketBuilder`] for the full surface and finalisation
+  /// methods.
+  ///
   /// # Examples
+  ///
+  /// Build a Data uplink, encrypt, and sign in one expression:
   ///
   /// ```
   /// use lora_packet::{LoraPacket, Direction, DevAddr, AppSKey, NwkSKey};
@@ -738,9 +936,25 @@ impl LoraPacket {
   ///   .f_cnt(2)
   ///   .f_port(1)
   ///   .payload(b"hi")
-  ///   .sign_and_encrypt(&app_s_key, &nwk_s_key)
-  ///   .unwrap();
+  ///   .sign_and_encrypt(&app_s_key, &nwk_s_key)?;
   /// assert!(packet.is_data());
+  /// # Ok::<(), lora_packet::Error>(())
+  /// ```
+  ///
+  /// Build and sign a Join Request:
+  ///
+  /// ```
+  /// use lora_packet::{LoraPacket, AppKey, AppEui, DevEui, DevNonce};
+  ///
+  /// let app_key = AppKey::new([0u8; 16]);
+  /// let packet = LoraPacket::builder()
+  ///   .join_request()
+  ///   .join_eui(AppEui::new([0u8; 8]))
+  ///   .dev_eui(DevEui::new([0u8; 8]))
+  ///   .dev_nonce(DevNonce::new([0u8; 2]))
+  ///   .sign_join_request(&app_key)?;
+  /// assert!(packet.is_join_request());
+  /// # Ok::<(), lora_packet::Error>(())
   /// ```
   pub fn builder() -> LoraPacketBuilder {
     LoraPacketBuilder::default()
@@ -942,15 +1156,43 @@ impl LoraPacketBuilder {
     Ok(packet)
   }
 
-  /// Build a Data packet, encrypt `FRMPayload`, and compute MIC.
+  /// Build a Data packet, encrypt `FRMPayload`, and compute the
+  /// `LoRaWAN` 1.0 MIC in one shot.
   ///
-  /// The plaintext payload provided via `.payload(...)` is encrypted with
-  /// `AppSKey` (when `FPort > 0`) or `NwkSKey` (when `FPort == 0`).
-  /// The MIC is then calculated using `LoRaWAN` 1.0 algorithm with `NwkSKey`.
+  /// The plaintext payload provided via [`payload`](Self::payload) is
+  /// encrypted with `AppSKey` (when `FPort > 0`) or `NwkSKey` (when
+  /// `FPort == 0`). The MIC is then calculated under `NwkSKey` with the
+  /// 1.0 algorithm.
+  ///
+  /// For 1.1 Data frames, build with [`build_unsigned`](Self::build_unsigned),
+  /// encrypt manually with [`Data::encrypt_payload`], and sign with
+  /// [`LoraPacket::recalculate_mic_v1_1`].
   ///
   /// # Errors
-  /// - `Error::MissingField` if required Data fields are missing.
-  /// - Any error from `build_unsigned` or `recalculate_mic_v1_0`.
+  /// - [`crate::Error::MissingField`] if required Data fields are missing.
+  /// - [`crate::Error::PayloadTooLarge`] if `FRMPayload` exceeds 4080 bytes.
+  /// - Any error from [`build_unsigned`](Self::build_unsigned) or
+  ///   [`LoraPacket::recalculate_mic_v1_0`].
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use lora_packet::{LoraPacket, Direction, DevAddr, AppSKey, NwkSKey};
+  ///
+  /// let app_s_key = AppSKey::from_slice(&hex::decode("ec925802ae430ca77fd3dd73cb2cc588")?)?;
+  /// let nwk_s_key = NwkSKey::from_slice(&hex::decode("44024241ed4ce9a68c6a8bc055233fd3")?)?;
+  ///
+  /// let packet = LoraPacket::builder()
+  ///   .data(Direction::Uplink, false)
+  ///   .dev_addr(DevAddr::new([0x49, 0xbe, 0x7d, 0xf1]))
+  ///   .f_cnt(2)
+  ///   .f_port(1)
+  ///   .payload(b"test")
+  ///   .sign_and_encrypt(&app_s_key, &nwk_s_key)?;
+  ///
+  /// assert_eq!(packet.to_wire(), hex::decode("40f17dbe4900020001954378762b11ff0d")?);
+  /// # Ok::<(), Box<dyn std::error::Error>>(())
+  /// ```
   pub fn sign_and_encrypt(
     self,
     app_s_key: &crate::types::AppSKey,
@@ -974,15 +1216,22 @@ impl LoraPacketBuilder {
     Ok(packet)
   }
 
-  /// Finalize the builder into a `LoraPacket` with MIC set to zero.
+  /// Finalise the builder into a [`LoraPacket`] with MIC set to zero.
   ///
-  /// Call a `sign_*` method on the builder, or call
-  /// `recalculate_mic_*` on the resulting `LoraPacket`, to fill in the MIC.
+  /// Useful when you want to sign and emit in separate steps (e.g. for test
+  /// vectors or when the signing keys arrive asynchronously). Call a
+  /// `sign_*` method on the builder, or call
+  /// [`recalculate_mic_v1_0`](LoraPacket::recalculate_mic_v1_0) /
+  /// [`recalculate_mic_v1_1`](LoraPacket::recalculate_mic_v1_1) on the
+  /// resulting packet, to fill in the MIC.
   ///
   /// # Errors
-  /// `Error::MissingField` when a required field for the chosen `MType` is missing.
-  /// `Error::FOptsTooLong` when the `FOpts` vec exceeds the 15-byte wire limit.
-  /// `Error::InvalidRejoinType` when the rejoin type is not in {0, 1, 2}.
+  /// - [`crate::Error::MissingField`] when a required field for the chosen
+  ///   `MType` is missing. The field name is in the error.
+  /// - [`crate::Error::FOptsTooLong`] when the `FOpts` vector exceeds the
+  ///   15-byte wire limit.
+  /// - [`crate::Error::InvalidRejoinType`] when the rejoin type is not in
+  ///   {0, 1, 2}.
   pub fn build_unsigned(self) -> crate::Result<LoraPacket> {
     let m_type = self.m_type.ok_or(crate::Error::MissingField("m_type"))?;
     let mhdr = Mhdr::from_parts(m_type, self.major);

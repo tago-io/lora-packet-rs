@@ -1,4 +1,23 @@
 //! CMAC-based message integrity codes for every `LoRaWAN` message type.
+//!
+//! The two public types are [`V1_0MicKeys`] and [`V1_1MicKeys`], which
+//! bundle the keys and context fields needed to compute or verify a MIC.
+//! The actual computation is dispatched from
+//! [`crate::LoraPacket::calculate_mic_v1_0`] /
+//! [`crate::LoraPacket::calculate_mic_v1_1`].
+//!
+//! Build the key set with struct literals and `Default::default()`:
+//!
+//! ```
+//! use lora_packet::{V1_0MicKeys, NwkSKey};
+//!
+//! let nwk_s_key = NwkSKey::new([0u8; 16]);
+//! let keys = V1_0MicKeys {
+//!   nwk_s_key: Some(&nwk_s_key),
+//!   ..Default::default()
+//! };
+//! # let _ = keys;
+//! ```
 
 use aes::Aes128;
 use cmac::{Cmac, KeyInit, Mac};
@@ -7,36 +26,79 @@ use subtle::ConstantTimeEq;
 use crate::types::{AppEui, AppKey, DevNonce, FNwkSIntKey, JSIntKey, NwkKey, NwkSKey, SNwkSIntKey};
 
 /// `LoRaWAN` 1.0 key set required by MIC operations.
+///
+/// Fields are all `Option` so callers can omit keys for message types
+/// they will not handle. A required-but-missing key surfaces as
+/// [`crate::Error::MissingKey`] from
+/// [`crate::LoraPacket::calculate_mic_v1_0`] /
+/// [`crate::LoraPacket::verify_mic_v1_0`].
+///
+/// Use `Default::default()` to start from an all-`None` value and fill in
+/// only what you need:
+///
+/// ```
+/// use lora_packet::{V1_0MicKeys, AppKey, NwkSKey};
+///
+/// let app_key = AppKey::new([0u8; 16]);
+/// let nwk_s_key = NwkSKey::new([0u8; 16]);
+/// let keys = V1_0MicKeys {
+///   app_key: Some(&app_key),
+///   nwk_s_key: Some(&nwk_s_key),
+///   ..Default::default()
+/// };
+/// # let _ = keys;
+/// ```
 #[derive(Debug, Default, Clone, Copy)]
 pub struct V1_0MicKeys<'a> {
-  /// `AppKey` for Join Request / Join Accept.
+  /// `AppKey` for Join Request and Join Accept MIC.
   pub app_key: Option<&'a AppKey>,
-  /// `NwkSKey` for Data messages.
+  /// `NwkSKey` for Data MIC (uplink and downlink).
   pub nwk_s_key: Option<&'a NwkSKey>,
-  /// Upper 16 bits of the data-frame `FCnt` (caller-tracked).
+  /// Upper 16 bits of the 32-bit Data `FCnt` (caller-tracked).
+  ///
+  /// The wire carries only the lower 16 bits; pass `0` if frame counters
+  /// never wrap in your deployment.
   pub f_cnt_msb: u16,
 }
 
 /// `LoRaWAN` 1.1 key set required by MIC operations.
+///
+/// 1.1 splits MIC responsibilities across more keys and threads more
+/// context bytes into the CMAC blocks. Fields are `Option`; only the
+/// values needed for the message variant being signed/verified must be
+/// set.
+///
+/// Per-variant requirements:
+/// - **Data uplink**: `f_nwk_s_int_key`, `s_nwk_s_int_key`, optionally
+///   `conf_fcnt_down_tx_dr_tx_ch`, `f_cnt_msb`.
+/// - **Data downlink**: `s_nwk_s_int_key`, optionally
+///   `conf_fcnt_down_tx_dr_tx_ch`, `f_cnt_msb`.
+/// - **Join Request**: `nwk_key`.
+/// - **Join Accept**: `js_int_key`, `join_eui`, `dev_nonce`,
+///   `join_req_type`.
+/// - **Rejoin Type 1**: `js_int_key`.
+/// - **Rejoin Type 0/2**: `s_nwk_s_int_key`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct V1_1MicKeys<'a> {
-  /// `NwkKey` for Join Request 1.1.
+  /// `NwkKey` for Join Request 1.1 MIC.
   pub nwk_key: Option<&'a NwkKey>,
-  /// `JSIntKey` for Join Accept 1.1.
+  /// `JSIntKey` for Join Accept and Rejoin Type 1 MIC.
   pub js_int_key: Option<&'a JSIntKey>,
-  /// `FNwkSIntKey` for Data uplink 1.1 (lower 2 MIC bytes).
+  /// `FNwkSIntKey` for Data uplink (lower 2 MIC bytes).
   pub f_nwk_s_int_key: Option<&'a FNwkSIntKey>,
-  /// `SNwkSIntKey` for Data uplink and downlink 1.1.
+  /// `SNwkSIntKey` for Data uplink (upper 2 MIC bytes), Data downlink,
+  /// and Rejoin Type 0/2.
   pub s_nwk_s_int_key: Option<&'a SNwkSIntKey>,
-  /// `JoinEUI` for Join Accept 1.1.
+  /// `JoinEUI` for Join Accept 1.1 MIC context.
   pub join_eui: Option<AppEui>,
-  /// `DevNonce` for Join Accept 1.1.
+  /// `DevNonce` for Join Accept 1.1 MIC context.
   pub dev_nonce: Option<DevNonce>,
-  /// `JoinReqType` byte for Join Accept 1.1.
+  /// `JoinReqType` byte for Join Accept 1.1 MIC context.
   pub join_req_type: Option<u8>,
-  /// Upper 16 bits of the data-frame `FCnt` (caller-tracked).
+  /// Upper 16 bits of the 32-bit Data `FCnt` (caller-tracked).
   pub f_cnt_msb: u16,
-  /// 4-byte `ConfFCntDown`||TxDr||TxCh context for Data 1.1.
+  /// 4-byte `ConfFCntDown || TxDr || TxCh` context for Data 1.1.
+  /// Defaults to all-zero when `None`.
   pub conf_fcnt_down_tx_dr_tx_ch: Option<[u8; 4]>,
 }
 
