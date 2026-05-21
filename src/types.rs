@@ -299,7 +299,7 @@ macro_rules! id_newtype {
       /// # Errors
       /// Returns [`Error::InvalidIdentifierLength`] when the slice length
       /// does not match the expected size.
-      pub fn from_slice(s: &[u8]) -> Result<Self> {
+      pub const fn from_slice(s: &[u8]) -> Result<Self> {
         if s.len() != $len {
           return Err(Error::InvalidIdentifierLength { expected: $len, got: s.len() });
         }
@@ -415,7 +415,7 @@ macro_rules! key_newtype {
       ///
       /// # Errors
       /// Returns [`Error::InvalidKeyLength`] when the slice is not 16 bytes.
-      pub fn from_slice(s: &[u8]) -> Result<Self> {
+      pub const fn from_slice(s: &[u8]) -> Result<Self> {
         if s.len() != 16 {
           return Err(Error::InvalidKeyLength { expected: 16, got: s.len() });
         }

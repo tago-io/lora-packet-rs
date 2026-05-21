@@ -13,7 +13,7 @@
 use alloc::vec::Vec;
 
 /// Reverse the bytes of `buf` in place.
-pub(crate) fn reverse_in_place(buf: &mut [u8]) {
+pub(crate) const fn reverse_in_place(buf: &mut [u8]) {
   buf.reverse();
 }
 

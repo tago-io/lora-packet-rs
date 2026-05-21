@@ -1257,11 +1257,11 @@ impl LoraPacketBuilder {
   ) -> crate::Result<LoraPacket> {
     let mut packet = self.build_unsigned()?;
     // Encrypt FRMPayload if data variant has one
-    if let Payload::Data(d) = &mut packet.payload {
-      if let Some(plaintext) = d.frm_payload.clone() {
-        let encrypted = d.encrypt_payload(&plaintext, app_s_key, nwk_s_key, 0)?;
-        d.frm_payload = Some(encrypted);
-      }
+    if let Payload::Data(d) = &mut packet.payload
+      && let Some(plaintext) = d.frm_payload.clone()
+    {
+      let encrypted = d.encrypt_payload(&plaintext, app_s_key, nwk_s_key, 0)?;
+      d.frm_payload = Some(encrypted);
     }
     // Refresh phy_payload with encrypted contents (no MIC yet)
     packet.phy_payload = packet.to_wire();
