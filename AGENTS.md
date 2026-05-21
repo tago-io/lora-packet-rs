@@ -34,7 +34,7 @@ If you are an AI coding agent landing in this repo, read this section first.
 ```
 .
 ├── AGENTS.md, CLAUDE.md (symlink)   Repo conventions for AI agents (this file)
-├── Cargo.toml                        Crate manifest, MSRV 1.85, edition 2024
+├── Cargo.toml                        Crate manifest, MSRV 1.95, edition 2024
 ├── Cargo.lock                        Committed for reproducible builds
 ├── README.md                         User-facing intro and quickstart
 ├── LICENSE                           MIT
@@ -137,7 +137,7 @@ both. Code that violates any of them must not be merged.
 
 ## Stack and conventions
 
-- **Language**: Rust, edition 2024, MSRV 1.85.0.
+- **Language**: Rust, edition 2024, MSRV 1.95.0.
 - **Crypto**: RustCrypto stack (`aes 0.9`, `cmac 0.8`, `cipher 0.5`,
   `subtle 2.6`, `zeroize 1.8`). Errors via `thiserror 2.0`. Optional
   features: `hex 0.4`, `base64 0.22`, `serde 1.0`.
@@ -168,7 +168,7 @@ both. Code that violates any of them must not be merged.
 | Build docs (with warnings)   | `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps` |
 | Dependency policy            | `cargo deny check`                                              |
 | Publish dry-run              | `cargo publish --dry-run --all-features`                        |
-| MSRV check                   | `cargo +1.85 check --all-features`                              |
+| MSRV check                   | `cargo +1.95 check --all-features`                              |
 
 ## Test parity rule (critical)
 

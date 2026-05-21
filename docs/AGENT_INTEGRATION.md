@@ -194,7 +194,7 @@ conversions you define yourself.
 - Pre-1.0: minor releases may include breaking changes; follow the
   changelog.
 - Post-1.0: semver. Field-level breakage triggers a major release.
-- MSRV is 1.85 (matches the `rust-toolchain.toml` in this repo). MSRV
+- MSRV is 1.95 (matches the `rust-toolchain.toml` in this repo). MSRV
   bumps will be flagged in release notes.
 
 ## Where to find help
