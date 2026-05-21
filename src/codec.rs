@@ -827,6 +827,38 @@ impl LoraPacketBuilder {
     self
   }
 
+  /// Build a Data packet, encrypt `FRMPayload`, and compute MIC.
+  ///
+  /// The plaintext payload provided via `.payload(...)` is encrypted with
+  /// `AppSKey` (when `FPort > 0`) or `NwkSKey` (when `FPort == 0`).
+  /// The MIC is then calculated using `LoRaWAN` 1.0 algorithm with `NwkSKey`.
+  ///
+  /// # Errors
+  /// - `Error::Other` if required Data fields are missing.
+  /// - Any error from `build_unsigned` or `recalculate_mic_v1_0`.
+  pub fn sign_and_encrypt(
+    self,
+    app_s_key: &crate::types::AppSKey,
+    nwk_s_key: &crate::types::NwkSKey,
+  ) -> crate::Result<LoraPacket> {
+    let mut packet = self.build_unsigned()?;
+    // Encrypt FRMPayload if data variant has one
+    if let Payload::Data(d) = &mut packet.payload {
+      if let Some(plaintext) = d.frm_payload.clone() {
+        let encrypted = d.encrypt_payload(&plaintext, app_s_key, nwk_s_key, 0)?;
+        d.frm_payload = Some(encrypted);
+      }
+    }
+    // Refresh phy_payload with encrypted contents (no MIC yet)
+    packet.phy_payload = packet.to_wire();
+    let keys = crate::mic::V1_0MicKeys {
+      nwk_s_key: Some(nwk_s_key),
+      ..Default::default()
+    };
+    packet.recalculate_mic_v1_0(&keys)?;
+    Ok(packet)
+  }
+
   /// Finalize the builder into a `LoraPacket` with MIC set to zero.
   ///
   /// Call a `sign_*` method on the builder, or call
@@ -1327,5 +1359,42 @@ mod tests {
       &packet.phy_payload[packet.phy_payload.len() - 4..],
       &[0x2b, 0x11, 0xff, 0x0d]
     );
+  }
+
+  #[test]
+  fn sign_and_encrypt_round_trip() {
+    use crate::mic::V1_0MicKeys;
+    use crate::types::{AppSKey, NwkSKey};
+
+    let app_s_key = AppSKey::from_slice(&hex_to_vec("ec925802ae430ca77fd3dd73cb2cc588")).unwrap();
+    let nwk_s_key = NwkSKey::from_slice(&hex_to_vec("44024241ed4ce9a68c6a8bc055233fd3")).unwrap();
+
+    let packet = LoraPacket::builder()
+      .data(Direction::Uplink, false)
+      .dev_addr(DevAddr::new([0x49, 0xbe, 0x7d, 0xf1]))
+      .f_ctrl(FCtrl(0))
+      .f_cnt(2)
+      .f_port(1)
+      .payload(b"test")
+      .sign_and_encrypt(&app_s_key, &nwk_s_key)
+      .unwrap();
+
+    // The encrypted payload should be the known ciphertext
+    let d = packet.as_data().unwrap();
+    assert_eq!(d.frm_payload.as_deref(), Some(&[0x95, 0x43, 0x78, 0x76][..]));
+
+    // MIC should match the known value
+    assert_eq!(packet.mic, [0x2b, 0x11, 0xff, 0x0d]);
+
+    // PHY payload should be the canonical wire frame
+    let expected_wire = hex_to_vec("40f17dbe4900020001954378762b11ff0d");
+    assert_eq!(packet.phy_payload, expected_wire);
+
+    // verify_mic_v1_0 succeeds
+    let keys = V1_0MicKeys {
+      nwk_s_key: Some(&nwk_s_key),
+      ..Default::default()
+    };
+    assert!(packet.verify_mic_v1_0(&keys).unwrap());
   }
 }
