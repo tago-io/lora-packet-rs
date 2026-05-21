@@ -289,10 +289,15 @@ pub use AppNonce as JoinNonce;
 
 /// Internal macro: declare a 16-byte key newtype with redacted Debug,
 /// explicit `Zeroize`, and the standard constructor/accessor surface.
+///
+/// Keys deliberately do not implement `Copy`. Copying secret material around
+/// the stack defeats `ZeroizeOnDrop`: every implicit copy leaves a residue
+/// no destructor can find. Callers borrow keys (`&key`) and explicitly clone
+/// only when ownership is required.
 macro_rules! key_newtype {
   ($(#[$meta:meta])* $name:ident) => {
     $(#[$meta])*
-    #[derive(Clone, Copy, PartialEq, Eq, Hash, zeroize::Zeroize)]
+    #[derive(Clone, PartialEq, Eq, Hash, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
     pub struct $name([u8; 16]);
 
     impl $name {
@@ -575,6 +580,19 @@ mod tests {
   fn key_zeroize_wipes_bytes() {
     use zeroize::Zeroize;
     let mut k = NwkSKey::new([0xFFu8; 16]);
+    k.zeroize();
+    assert_eq!(k.as_bytes(), &[0u8; 16]);
+  }
+
+  #[test]
+  fn key_zeroize_on_drop() {
+    // Direct verification of the drop-time wipe is not possible from safe
+    // Rust: once a value is dropped its storage may be reused. The presence
+    // of `zeroize::ZeroizeOnDrop` in the derives (see the macro) is what
+    // gives the guarantee. As a smoke test, confirm that explicit
+    // `Zeroize::zeroize` clears the bytes; the same impl runs on drop.
+    use zeroize::Zeroize;
+    let mut k = NwkSKey::new([0xff; 16]);
     k.zeroize();
     assert_eq!(k.as_bytes(), &[0u8; 16]);
   }
